@@ -2,7 +2,7 @@ FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
 
 ENV REFRESHED_AT 2024-08-12
 
-LABEL io.k8s.description="Headless VNC Container with Xfce window manager, firefox and chromium" \
+LABEL io.k8s.description="Headless VNC Container with IceWM window manager, firefox and chromium" \
       io.k8s.display-name="Headless VNC Container based on Debian" \
       io.openshift.expose-services="6901:http,5901:xvnc" \
       io.openshift.tags="vnc, debian, xfce" \
@@ -16,7 +16,7 @@ ENV DISPLAY=:1 \
     NO_VNC_PORT=6901
 EXPOSE $VNC_PORT $NO_VNC_PORT
 
-### Envrionment config
+### Environment config
 ENV HOME=/workspace \
     TERM=xterm \
     STARTUPDIR=/dockerstartup \
@@ -26,7 +26,8 @@ ENV HOME=/workspace \
     VNC_COL_DEPTH=24 \
     VNC_PW=vncpassword \
     VNC_VIEW_ONLY=false \
-    TZ=Pacific/Auckland
+    TZ=Pacific/Auckland \
+    VNC_RESOLUTION=1280x1024
 WORKDIR $HOME
 
 ### Install necessary dependencies
@@ -37,9 +38,9 @@ RUN apt-get update && apt-get install -y \
     software-properties-common \
     apt-transport-https \
     ca-certificates \
-    git \
     unzip \
     ffmpeg \
+    icewm \
     jq \
     tzdata && \
     ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
@@ -62,10 +63,9 @@ ADD ./src/debian/install/ $INST_SCRIPTS/
 RUN chmod 765 $INST_SCRIPTS/*
 
 ### Install some common tools
-RUN chmod +x $INST_SCRIPTS/tools.sh && $INST_SCRIPTS/tools.sh && \
+RUN $INST_SCRIPTS/tools.sh && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
-    
 ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en' LC_ALL='en_US.UTF-8'
 
 ### Install custom fonts
@@ -84,14 +84,10 @@ RUN $INST_SCRIPTS/firefox.sh && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-### Install IceWM UI
-RUN apt-get update && apt-get install -y icewm && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-    
+### Setup IceWM UI
 ADD ./src/debian/icewm/ $HOME/
 
-### configure startup
+### Configure startup
 RUN $INST_SCRIPTS/libnss_wrapper.sh
 ADD ./src/common/scripts $STARTUPDIR
 RUN $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
@@ -120,17 +116,17 @@ RUN git clone -b v0.1.6 https://github.com/visomaster/VisoMaster.git && \
     cd VisoMaster && \
     mkdir -p Image Video Output
 
-### Split the requirements installation to manage space better
+### Handle Python dependencies with disk space optimization
 WORKDIR /workspace/VisoMaster
 
-# Install basic requirements first
-RUN conda install scikit-image -y && conda clean --all -y
+# Install scikit-image
+RUN conda install -y scikit-image && conda clean --all -y
 
-# Split PyTorch installation to manage disk space
-RUN pip install --no-cache-dir torch==2.4.1+cu124 -f https://download.pytorch.org/whl/torch_stable.html && \
+# Install PyTorch separately to manage disk space
+RUN pip install --no-cache-dir torch==2.4.1+cu124 torchvision==0.15.1+cu124 --index-url https://download.pytorch.org/whl/cu124 && \
     pip cache purge
 
-# Install the rest of the requirements
+# Run pip install with --no-cache-dir to avoid cache pollution
 RUN pip install --no-cache-dir -r requirements_cu124.txt --ignore-installed torch && \
     pip uninstall -y onnxruntime-gpu && \
     pip install --no-cache-dir onnxruntime-gpu==1.19.0 && \
@@ -139,23 +135,16 @@ RUN pip install --no-cache-dir -r requirements_cu124.txt --ignore-installed torc
 ### Download models
 RUN python download_models.py
 
-### Download specific inswapper file and TensorRT
+### Download specific inswapper file and TensorRT directly from Hugging Face
 RUN wget -O inswapper_128_fp16.onnx https://huggingface.co/Red1618/Viso/resolve/main/inswapper_128_fp16.onnx?download=true && \
     cp inswapper_128_fp16.onnx /workspace/VisoMaster/model_assets/ && \
-    mkdir -p /workspace/VisoMaster/tensorrt_engine
-
-# Download and extract TensorRT in smaller chunks to manage disk space
-RUN wget -O TensorRT.tar.gz https://huggingface.co/Red1618/Viso/resolve/main/TensorRT-10.9.0.34.Linux.x86_64-gnu.cuda-12.8.tar.gz?download=true && \
-    mkdir -p /tmp/tensorrt_extract && \
-    tar -xzf TensorRT.tar.gz -C /tmp/tensorrt_extract && \
-    mkdir -p /workspace/VisoMaster/tensorrt_engine/TensorRT-10.9.0.34 && \
-    cp -r /tmp/tensorrt_extract/TensorRT-10.9.0.34/bin /workspace/VisoMaster/tensorrt_engine/TensorRT-10.9.0.34/ && \
-    cp -r /tmp/tensorrt_extract/TensorRT-10.9.0.34/include /workspace/VisoMaster/tensorrt_engine/TensorRT-10.9.0.34/ && \
-    cp -r /tmp/tensorrt_extract/TensorRT-10.9.0.34/lib /workspace/VisoMaster/tensorrt_engine/TensorRT-10.9.0.34/ && \
-    rm -rf /tmp/tensorrt_extract TensorRT.tar.gz
+    mkdir -p /workspace/VisoMaster/tensorrt_engine && \
+    wget -O TensorRT.tar.gz https://huggingface.co/Red1618/Viso/resolve/main/TensorRT-10.9.0.34.Linux.x86_64-gnu.cuda-12.8.tar.gz?download=true && \
+    tar -xzf TensorRT.tar.gz -C /workspace/VisoMaster/tensorrt_engine --strip-components=1 && \
+    rm -f TensorRT.tar.gz
 
 ### Add TensorRT to PATH
-ENV TRT_HOME=/workspace/VisoMaster/tensorrt_engine/TensorRT-10.9.0.34
+ENV TRT_HOME=/workspace/VisoMaster/tensorrt_engine
 ENV PATH=${TRT_HOME}/bin:${PATH}
 ENV LD_LIBRARY_PATH=${TRT_HOME}/lib:${LD_LIBRARY_PATH}
 ENV LIBRARY_PATH=${TRT_HOME}/lib:${LIBRARY_PATH}
@@ -171,14 +160,12 @@ RUN mkdir -p dependencies && \
 RUN pip install --no-cache-dir jupyterlab && \
     wget -O - https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash && \
     pip cache purge
-
+    
 EXPOSE 8080 8585
 
-### Reconfigure startup
+### Configure startup
 COPY ./src/vnc_startup_jupyterlab_filebrowser.sh /dockerstartup/vnc_startup.sh
 RUN chmod 765 /dockerstartup/vnc_startup.sh
-
-ENV VNC_RESOLUTION=1280x1024
 
 ENTRYPOINT ["/dockerstartup/vnc_startup.sh"]
 CMD ["--wait"]
