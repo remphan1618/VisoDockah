@@ -20,15 +20,16 @@ jobs:
         run: |
           echo "Available disk space before cleanup:"
           df -h
-          
-      - name: Clean up Docker cache
+
+      - name: Clean up Docker cache and unused resources
         run: |
           echo "Pruning Docker system to free up space..."
-          docker system prune -af
-          docker volume prune -f
+          docker system prune -af --volumes
+          docker rmi $(docker images -q --filter "dangling=true") || true
+          docker rm $(docker ps -aq) || true
           echo "Available disk space after Docker cleanup:"
           df -h
-          
+
       - name: Checkout Repository
         uses: actions/checkout@v3
         with:
@@ -70,10 +71,6 @@ jobs:
         if: always()  # Run even if the build fails
         run: |
           echo "Cleaning up after build..."
-          docker system prune -af
-          docker images
+          docker system prune -af --volumes
           echo "Final disk space:"
           df -h
-
-# This workflow automatically builds and pushes a Docker image
-# whenever code is pushed to the main branch or manually triggered.
