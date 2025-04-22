@@ -47,7 +47,7 @@ RUN pip install --no-cache-dir torch==2.4.1+cu124 --index-url https://download.p
     pip cache purge
 
 # Download models (keeping these in the Docker image)
-RUN python download_models.py
+RUN python3 download_models.py
 
 # Set environment variables for TensorRT (actual download happens via vast.ai onstart script)
 ENV TRT_HOME=/workspace/VisoMaster/tensorrt_engine
