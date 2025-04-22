@@ -44,12 +44,14 @@ RUN apt-get update && apt-get install -y \
     tzdata && \
     ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
     dpkg-reconfigure -f noninteractive tzdata && \
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 ### Install Miniconda
 RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
-bash miniconda.sh -b -p /opt/conda && \
-rm miniconda.sh
+    bash miniconda.sh -b -p /opt/conda && \
+    rm miniconda.sh && \
+    /opt/conda/bin/conda clean -a -y
 
 ### Add Conda to the PATH
 ENV PATH /opt/conda/bin:$PATH
@@ -60,22 +62,34 @@ ADD ./src/debian/install/ $INST_SCRIPTS/
 RUN chmod 765 $INST_SCRIPTS/*
 
 ### Install some common tools
-RUN chmod +x $INST_SCRIPTS/tools.sh && $INST_SCRIPTS/tools.sh
+RUN chmod +x $INST_SCRIPTS/tools.sh && $INST_SCRIPTS/tools.sh && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+    
 ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en' LC_ALL='en_US.UTF-8'
 
 ### Install custom fonts
-RUN $INST_SCRIPTS/install_custom_fonts.sh
+RUN $INST_SCRIPTS/install_custom_fonts.sh && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 ### Install xvnc-server & noVNC - HTML5 based VNC viewer
-RUN $INST_SCRIPTS/tigervnc.sh
-RUN $INST_SCRIPTS/no_vnc_1.5.0.sh
+RUN $INST_SCRIPTS/tigervnc.sh && \
+    $INST_SCRIPTS/no_vnc_1.5.0.sh && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 ### Install firefox and chrome browser
-RUN $INST_SCRIPTS/firefox.sh
+RUN $INST_SCRIPTS/firefox.sh && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-### Install UI
-RUN $INST_SCRIPTS/xfce_ui.sh
-ADD ./src/common/xfce/ $HOME/
+### Install IceWM UI
+RUN apt-get update && apt-get install -y icewm && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+    
+ADD ./src/debian/icewm/ $HOME/
 
 ### configure startup
 RUN $INST_SCRIPTS/libnss_wrapper.sh
@@ -91,8 +105,9 @@ RUN echo "source activate $CONDA_DEFAULT_ENV" >> ~/.bashrc
 ENV PATH /opt/conda/envs/$CONDA_DEFAULT_ENV/bin:$PATH
 
 ### Install CUDA and cuDNN
-RUN conda install -c nvidia/label/cuda-12.4.1 cuda-runtime
-RUN conda install -c conda-forge cudnn
+RUN conda install -c nvidia/label/cuda-12.4.1 cuda-runtime && \
+    conda install -c conda-forge cudnn && \
+    conda clean --all -y
 
 ### Set up CUDA and cuDNN paths
 ENV CUDA_HOME=/usr/local/cuda-12.4
@@ -101,28 +116,43 @@ ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}
 
 ### Install visomaster specific version
 WORKDIR /workspace
-RUN git clone -b v0.1.6 https://github.com/visomaster/VisoMaster.git
+RUN git clone -b v0.1.6 https://github.com/visomaster/VisoMaster.git && \
+    cd VisoMaster && \
+    mkdir -p Image Video Output
+
+### Split the requirements installation to manage space better
 WORKDIR /workspace/VisoMaster
 
-### Create necessary directories
-RUN mkdir -p Image Video Output
+# Install basic requirements first
+RUN conda install scikit-image -y && conda clean --all -y
 
-### Install dependencies
-RUN conda install scikit-image
-RUN pip install -r requirements_cu124.txt
-RUN pip uninstall -y onnxruntime-gpu && pip install onnxruntime-gpu==1.19.0
+# Split PyTorch installation to manage disk space
+RUN pip install --no-cache-dir torch==2.4.1+cu124 -f https://download.pytorch.org/whl/torch_stable.html && \
+    pip cache purge
+
+# Install the rest of the requirements
+RUN pip install --no-cache-dir -r requirements_cu124.txt --ignore-installed torch && \
+    pip uninstall -y onnxruntime-gpu && \
+    pip install --no-cache-dir onnxruntime-gpu==1.19.0 && \
+    pip cache purge
 
 ### Download models
-WORKDIR /workspace/VisoMaster
 RUN python download_models.py
 
 ### Download specific inswapper file and TensorRT
-WORKDIR /workspace/VisoMaster
-RUN wget -O inswapper_128_fp16.onnx https://huggingface.co/Red1618/Viso/resolve/main/inswapper_128_fp16.onnx?download=true
-RUN cp inswapper_128_fp16.onnx /workspace/VisoMaster/model_assets/
-RUN wget -O TensorRT-10.9.0.34.Linux.x86_64-gnu.cuda-12.8.tar.gz https://huggingface.co/Red1618/Viso/resolve/main/TensorRT-10.9.0.34.Linux.x86_64-gnu.cuda-12.8.tar.gz?download=true
-RUN mkdir -p /workspace/VisoMaster/tensorrt_engine
-RUN tar -xzvf TensorRT-10.9.0.34.Linux.x86_64-gnu.cuda-12.8.tar.gz -C /workspace/VisoMaster/tensorrt_engine
+RUN wget -O inswapper_128_fp16.onnx https://huggingface.co/Red1618/Viso/resolve/main/inswapper_128_fp16.onnx?download=true && \
+    cp inswapper_128_fp16.onnx /workspace/VisoMaster/model_assets/ && \
+    mkdir -p /workspace/VisoMaster/tensorrt_engine
+
+# Download and extract TensorRT in smaller chunks to manage disk space
+RUN wget -O TensorRT.tar.gz https://huggingface.co/Red1618/Viso/resolve/main/TensorRT-10.9.0.34.Linux.x86_64-gnu.cuda-12.8.tar.gz?download=true && \
+    mkdir -p /tmp/tensorrt_extract && \
+    tar -xzf TensorRT.tar.gz -C /tmp/tensorrt_extract && \
+    mkdir -p /workspace/VisoMaster/tensorrt_engine/TensorRT-10.9.0.34 && \
+    cp -r /tmp/tensorrt_extract/TensorRT-10.9.0.34/bin /workspace/VisoMaster/tensorrt_engine/TensorRT-10.9.0.34/ && \
+    cp -r /tmp/tensorrt_extract/TensorRT-10.9.0.34/include /workspace/VisoMaster/tensorrt_engine/TensorRT-10.9.0.34/ && \
+    cp -r /tmp/tensorrt_extract/TensorRT-10.9.0.34/lib /workspace/VisoMaster/tensorrt_engine/TensorRT-10.9.0.34/ && \
+    rm -rf /tmp/tensorrt_extract TensorRT.tar.gz
 
 ### Add TensorRT to PATH
 ENV TRT_HOME=/workspace/VisoMaster/tensorrt_engine/TensorRT-10.9.0.34
@@ -132,18 +162,17 @@ ENV LIBRARY_PATH=${TRT_HOME}/lib:${LIBRARY_PATH}
 ENV CPATH=${TRT_HOME}/include:${CPATH}
 
 ### Download dependencies
-WORKDIR /workspace/VisoMaster
-RUN mkdir -p dependencies
-RUN wget -O dependencies.zip https://github.com/visomaster/visomaster-assets/releases/download/v0.1.0_dp/dependencies.zip
-RUN unzip dependencies.zip -d dependencies && rm dependencies.zip
+RUN mkdir -p dependencies && \
+    wget -O dependencies.zip https://github.com/visomaster/visomaster-assets/releases/download/v0.1.0_dp/dependencies.zip && \
+    unzip dependencies.zip -d dependencies && \
+    rm dependencies.zip
 
-### Install jupyterlab
-RUN pip install jupyterlab
-EXPOSE 8080
+### Install jupyterlab and filebrowser
+RUN pip install --no-cache-dir jupyterlab && \
+    wget -O - https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash && \
+    pip cache purge
 
-### Install filebrowser
-RUN wget -O - https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash
-EXPOSE 8585
+EXPOSE 8080 8585
 
 ### Reconfigure startup
 COPY ./src/vnc_startup_jupyterlab_filebrowser.sh /dockerstartup/vnc_startup.sh
