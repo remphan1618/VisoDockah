@@ -108,7 +108,6 @@ WORKDIR /workspace/VisoMaster
 RUN mkdir -p Image Video Output
 
 ### Install dependencies
-RUN pip install -r ./requirements.txt --no-cache-dir
 RUN conda install scikit-image
 RUN pip install -r requirements_cu124.txt
 RUN pip uninstall -y onnxruntime-gpu && pip install onnxruntime-gpu==1.19.0
