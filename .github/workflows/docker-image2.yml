@@ -6,7 +6,7 @@ on:
       - main  # Runs when changes are pushed to the main branch
   workflow_dispatch:  # Allows manual triggering
 
-# Add this concurrency section
+# Prevent duplicate builds
 concurrency:
   group: docker-build-${{ github.ref }}
   cancel-in-progress: true
@@ -16,9 +16,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check disk space before checkout
+      - name: Check disk space before cleanup
         run: |
-          echo "Available disk space before checkout:"
+          echo "Available disk space before cleanup:"
+          df -h
+          
+      - name: Clean up Docker cache
+        run: |
+          echo "Pruning Docker system to free up space..."
+          docker system prune -af
+          docker volume prune -f
+          echo "Available disk space after Docker cleanup:"
           df -h
           
       - name: Checkout Repository
@@ -43,7 +51,9 @@ jobs:
           du -h -d1 /
           
       - name: Build Docker Image
-        run: docker build -t remphan/visomasterdockah:latest -f Dockerfile-icewm .
+        run: |
+          # Using --no-cache to prevent using cached layers
+          docker build --no-cache -t remphan/visomasterdockah:latest -f Dockerfile-icewm .
         
       - name: Check disk space after build
         if: always()  # Run even if the build fails
@@ -55,6 +65,15 @@ jobs:
 
       - name: Push Docker Image
         run: docker push remphan/visomasterdockah:latest
+        
+      - name: Cleanup after build
+        if: always()  # Run even if the build fails
+        run: |
+          echo "Cleaning up after build..."
+          docker system prune -af
+          docker images
+          echo "Final disk space:"
+          df -h
 
 # This workflow automatically builds and pushes a Docker image
 # whenever code is pushed to the main branch or manually triggered.
