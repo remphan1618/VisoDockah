@@ -1,76 +1,60 @@
-name: Build and Push Docker Image
+name: Build and Test Workflow
 
 on:
   push:
     branches:
-      - main  # Runs when changes are pushed to the main branch
-  workflow_dispatch:  # Allows manual triggering
-
-# Prevent duplicate builds
-concurrency:
-  group: docker-build-${{ github.ref }}
-  cancel-in-progress: true
+      - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
-  build-and-push:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check disk space before cleanup
-        run: |
-          echo "Available disk space before cleanup:"
-          df -h
+    # Checkout the repository
+    - name: Checkout code
+      uses: actions/checkout@v3
 
-      - name: Clean up Docker cache and unused resources
-        run: |
-          echo "Pruning Docker system to free up space..."
-          docker system prune -af --volumes
-          docker rmi $(docker images -q --filter "dangling=true") || true
-          docker rm $(docker ps -aq) || true
-          echo "Available disk space after Docker cleanup:"
-          df -h
+    # Clean up disk space
+    - name: Cleanup unused files
+      run: |
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc
+        sudo apt-get clean
+        df -h
 
-      - name: Checkout Repository
-        uses: actions/checkout@v3
-        with:
-          clean: true
+    # Set up Python
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
 
-      - name: Log in to Docker Hub
-        env:
-          DOCKERHUB_USERNAME: remphan
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+    # Cache Python dependencies
+    - name: Cache Python dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
 
-      - name: Check Dockerfile content
-        run: cat Dockerfile-icewm
-      
-      - name: Check disk space before build
-        run: |
-          echo "Available disk space before build:"
-          df -h
-          echo "Top disk usage folders:"
-          du -h -d1 /
-          
-      - name: Build Docker Image
-        run: |
-          # Using --no-cache to prevent using cached layers
-          docker build --no-cache -t remphan/visomasterdockah:latest -f Dockerfile-icewm .
-        
-      - name: Check disk space after build
-        if: always()  # Run even if the build fails
-        run: |
-          echo "Available disk space after build:"
-          df -h
-          echo "Docker image size:"
-          docker images remphan/visomasterdockah:latest --format "{{.Size}}"
+    # Install dependencies
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
 
-      - name: Push Docker Image
-        run: docker push remphan/visomasterdockah:latest
-        
-      - name: Cleanup after build
-        if: always()  # Run even if the build fails
-        run: |
-          echo "Cleaning up after build..."
-          docker system prune -af --volumes
-          echo "Final disk space:"
-          df -h
+    # Run tests
+    - name: Run tests
+      run: |
+        pytest
+
+    # Upload artifacts if needed
+    - name: Upload test artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-results
+        path: ./test_results/
