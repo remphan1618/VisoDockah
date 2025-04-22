@@ -6,11 +6,21 @@ on:
       - main  # Runs when changes are pushed to the main branch
   workflow_dispatch:  # Allows manual triggering
 
+# Add this concurrency section
+concurrency:
+  group: docker-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check disk space before checkout
+        run: |
+          echo "Available disk space before checkout:"
+          df -h
+          
       - name: Checkout Repository
         uses: actions/checkout@v3
         with:
@@ -25,8 +35,26 @@ jobs:
       - name: Check Dockerfile content
         run: cat Dockerfile-icewm
       
+      - name: Check disk space before build
+        run: |
+          echo "Available disk space before build:"
+          df -h
+          echo "Top disk usage folders:"
+          du -h -d1 /
+          
       - name: Build Docker Image
         run: docker build -t remphan/visomasterdockah:latest -f Dockerfile-icewm .
+        
+      - name: Check disk space after build
+        if: always()  # Run even if the build fails
+        run: |
+          echo "Available disk space after build:"
+          df -h
+          echo "Docker image size:"
+          docker images remphan/visomasterdockah:latest --format "{{.Size}}"
+
+      - name: Push Docker Image
+        run: docker push remphan/visomasterdockah:latest
 
 # This workflow automatically builds and pushes a Docker image
 # whenever code is pushed to the main branch or manually triggered.
