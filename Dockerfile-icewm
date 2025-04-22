@@ -35,7 +35,8 @@ RUN git clone -b v0.1.6 https://github.com/visomaster/VisoMaster.git && \
     mkdir -p /workspace/VisoMaster/Image \
     /workspace/VisoMaster/Video \
     /workspace/VisoMaster/Output \
-    /workspace/VisoMaster/model_assets
+    /workspace/VisoMaster/model_assets \
+    /workspace/VisoMaster/tensorrt_engine
 
 # Install Python dependencies
 WORKDIR /workspace/VisoMaster
@@ -48,10 +49,7 @@ RUN pip install --no-cache-dir torch==2.4.1+cu124 --index-url https://download.p
 # Download models (keeping these in the Docker image)
 RUN python download_models.py
 
-# Download special inswapper file
-RUN wget -O /workspace/VisoMaster/model_assets/inswapper_128_fp16.onnx https://huggingface.co/Red1618/Viso/resolve/main/inswapper_128_fp16.onnx?download=true
-
-# Set environment variables for TensorRT (actual download happens at runtime)
+# Set environment variables for TensorRT (actual download happens via vast.ai onstart script)
 ENV TRT_HOME=/workspace/VisoMaster/tensorrt_engine
 ENV PATH=${TRT_HOME}/bin:${PATH}
 ENV LD_LIBRARY_PATH=${TRT_HOME}/lib:${LD_LIBRARY_PATH}
@@ -69,43 +67,8 @@ RUN apt-get clean && \
     rm -rf /tmp/* && \
     rm -rf /var/tmp/*
 
-# Create onstart script
-RUN echo '#!/bin/bash' > /workspace/onstart.sh && \
-    echo 'set -e' >> /workspace/onstart.sh && \
-    echo 'echo "Starting VisoMaster setup..."' >> /workspace/onstart.sh && \
-    echo '' >> /workspace/onstart.sh && \
-    echo '# Download TensorRT if not already present' >> /workspace/onstart.sh && \
-    echo 'if [ ! -d "/workspace/VisoMaster/tensorrt_engine" ] || [ -z "$(ls -A /workspace/VisoMaster/tensorrt_engine)" ]; then' >> /workspace/onstart.sh && \
-    echo '  echo "Downloading TensorRT..."' >> /workspace/onstart.sh && \
-    echo '  mkdir -p /workspace/VisoMaster/tensorrt_engine' >> /workspace/onstart.sh && \
-    echo '  wget -O TensorRT.tar.gz https://huggingface.co/Red1618/Viso/resolve/main/TensorRT-10.9.0.34.Linux.x86_64-gnu.cuda-12.8.tar.gz?download=true' >> /workspace/onstart.sh && \
-    echo '  tar -xzf TensorRT.tar.gz -C /workspace/VisoMaster/tensorrt_engine --strip-components=1' >> /workspace/onstart.sh && \
-    echo '  rm -f TensorRT.tar.gz' >> /workspace/onstart.sh && \
-    echo '  ' >> /workspace/onstart.sh && \
-    echo '  # Set up environment variables' >> /workspace/onstart.sh && \
-    echo '  echo '"'"'export TRT_HOME=/workspace/VisoMaster/tensorrt_engine'"'"' >> ~/.bashrc' >> /workspace/onstart.sh && \
-    echo '  echo '"'"'export PATH=$PATH:$TRT_HOME/bin'"'"' >> ~/.bashrc' >> /workspace/onstart.sh && \
-    echo '  echo '"'"'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$TRT_HOME/lib'"'"' >> ~/.bashrc' >> /workspace/onstart.sh && \
-    echo '  echo '"'"'export LIBRARY_PATH=$LIBRARY_PATH:$TRT_HOME/lib'"'"' >> ~/.bashrc' >> /workspace/onstart.sh && \
-    echo '  echo '"'"'export CPATH=$CPATH:$TRT_HOME/include'"'"' >> ~/.bashrc' >> /workspace/onstart.sh && \
-    echo 'fi' >> /workspace/onstart.sh && \
-    echo '' >> /workspace/onstart.sh && \
-    echo '# Download dependencies if not already present' >> /workspace/onstart.sh && \
-    echo 'if [ ! -d "/workspace/VisoMaster/dependencies" ] || [ -z "$(ls -A /workspace/VisoMaster/dependencies)" ]; then' >> /workspace/onstart.sh && \
-    echo '  echo "Downloading dependencies..."' >> /workspace/onstart.sh && \
-    echo '  mkdir -p /workspace/VisoMaster/dependencies' >> /workspace/onstart.sh && \
-    echo '  wget -O dependencies.zip https://github.com/visomaster/visomaster-assets/releases/download/v0.1.0_dp/dependencies.zip' >> /workspace/onstart.sh && \
-    echo '  unzip dependencies.zip -d /workspace/VisoMaster/dependencies' >> /workspace/onstart.sh && \
-    echo '  rm -f dependencies.zip' >> /workspace/onstart.sh && \
-    echo 'fi' >> /workspace/onstart.sh && \
-    echo '' >> /workspace/onstart.sh && \
-    echo 'echo "Setup complete! Starting main application..."' >> /workspace/onstart.sh && \
-    echo '' >> /workspace/onstart.sh && \
-    echo '# Start the VNC server' >> /workspace/onstart.sh && \
-    echo '/dockerstartup/vnc_startup.sh' >> /workspace/onstart.sh && \
-    chmod +x /workspace/onstart.sh
-
 # Expose ports
 EXPOSE $VNC_PORT $NO_VNC_PORT 8080 8585
 
-ENTRYPOINT ["/workspace/onstart.sh"]
+# Use vnc_startup.sh as entrypoint
+ENTRYPOINT ["/dockerstartup/vnc_startup.sh"]
