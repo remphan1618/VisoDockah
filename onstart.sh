@@ -1,18 +1,22 @@
 #!/bin/bash
 echo "Starting VisoMaster environment setup..."
 
+# Create logs directory in workspace
+mkdir -p /workspace/logs
+export LOG_DIR=/workspace/logs
+
 # Save environment variables for any service that needs them
 env | grep _ >> /etc/environment
 
 # Set VNC environment variables
-export DISPLAY=:0
+export DISPLAY=:1
 export VNC_PORT=5901
 export NO_VNC_PORT=6901
 export NO_VNC_HOME=/workspace/noVNC 
 export STARTUPDIR=/dockerstartup
 export VNC_COL_DEPTH=24
 export VNC_RESOLUTION=1280x1024
-export VNC_PW=1234
+export VNC_PW=vncpassword
 export VNC_PASSWORDLESS=true
 
 # Start SSH server if installed
@@ -58,13 +62,14 @@ PASSWD_PATH="$HOME/.vnc/passwd"
 if [[ -f $PASSWD_PATH ]]; then
     rm -f $PASSWD_PATH
 fi
+
 echo "$VNC_PW" | vncpasswd -f >> $PASSWD_PATH
 chmod 600 $PASSWD_PATH
 
 # Start noVNC
 echo "Starting noVNC web client..."
 if [ -d "$NO_VNC_HOME" ]; then
-  $NO_VNC_HOME/utils/novnc_proxy --vnc localhost:$VNC_PORT --listen $NO_VNC_PORT > $STARTUPDIR/no_vnc_startup.log 2>&1 &
+  $NO_VNC_HOME/utils/novnc_proxy --vnc localhost:$VNC_PORT --listen $NO_VNC_PORT > $LOG_DIR/novnc_startup.log 2>&1 &
   PID_SUB=$!
 else
   echo "WARNING: noVNC home directory not found"
@@ -75,13 +80,13 @@ fi
 
 # Start VNC server
 echo "Starting VNC server..."
-vncserver -kill $DISPLAY &> $STARTUPDIR/vnc_startup.log 2>/dev/null || true
-vncserver $DISPLAY -depth $VNC_COL_DEPTH -geometry $VNC_RESOLUTION PasswordFile=$HOME/.vnc/passwd -SecurityTypes None > $STARTUPDIR/no_vnc_startup.log 2>&1
+vncserver -kill $DISPLAY &> $LOG_DIR/vnc_startup.log 2>/dev/null || true
+vncserver $DISPLAY -depth $VNC_COL_DEPTH -geometry $VNC_RESOLUTION PasswordFile=$HOME/.vnc/passwd -SecurityTypes None > $LOG_DIR/vnc_startup.log 2>&1
 
 # Start window manager
 echo "Starting window manager..."
 if [ -f "$HOME/wm_startup.sh" ]; then
-  $HOME/wm_startup.sh &> $STARTUPDIR/wm_startup.log &
+  $HOME/wm_startup.sh &> $LOG_DIR/wm_startup.log &
 else
   echo "WARNING: Window manager startup script not found"
 fi
@@ -89,14 +94,14 @@ fi
 # Start additional services
 echo "Starting JupyterLab at port 8080..."
 if command -v jupyter &> /dev/null; then
-  jupyter lab --port 8080 --notebook-dir=/workspace --allow-root --no-browser --ip=0.0.0.0 --NotebookApp.token='' --NotebookApp.password='' > $STARTUPDIR/jupyter.log 2>&1 &
+  jupyter lab --port 8080 --notebook-dir=/workspace --allow-root --no-browser --ip=0.0.0.0 --NotebookApp.token='' --NotebookApp.password='' > $LOG_DIR/jupyter.log 2>&1 &
 else
   echo "WARNING: JupyterLab not found"
 fi
 
 echo "Starting Filebrowser at port 8585..."
 if command -v filebrowser &> /dev/null; then
-  filebrowser -r /workspace -p 8585 -a 0.0.0.0 --noauth > $STARTUPDIR/filebrowser.log 2>&1 &
+  filebrowser -r /workspace -p 8585 -a 0.0.0.0 --noauth > $LOG_DIR/filebrowser.log 2>&1 &
 else
   echo "WARNING: Filebrowser not found"
 fi
@@ -105,7 +110,7 @@ fi
 echo "Starting VisoMaster..."
 if [ -f "/workspace/VisoMaster/main.py" ]; then
   cd /workspace/VisoMaster
-  nohup python main.py > $STARTUPDIR/visomaster.log 2>&1 &
+  nohup python main.py > $LOG_DIR/visomaster.log 2>&1 &
 else
   echo "WARNING: VisoMaster main.py not found"
 fi
@@ -116,6 +121,7 @@ echo "- Web VNC: port 6901"
 echo "- JupyterLab: port 8080"
 echo "- Filebrowser: port 8585"
 echo "- VisoMaster: Running in background"
+echo "- All logs are saved in: /workspace/logs/"
 
 # Keep the script running
 wait $PID_SUB
