@@ -4,6 +4,22 @@ echo "Starting VisoMaster environment setup..."
 # Save environment variables for any service that needs them
 env | grep _ >> /etc/environment
 
+# Set VNC environment variables
+export DISPLAY=:1
+export VNC_PORT=5901
+export NO_VNC_PORT=6901
+export NO_VNC_HOME=/workspace/noVNC 
+export VNC_COL_DEPTH=24
+export VNC_RESOLUTION=1280x1024
+export VNC_PW=vncpassword
+export VNC_PASSWORDLESS=true
+
+# Start SSH server if installed
+if [ -f /usr/sbin/sshd ]; then
+  echo "Starting SSH server..."
+  mkdir -p /var/run/sshd
+  /usr/sbin/sshd || echo "WARNING: Failed to start SSH server"
+fi
 
 # Download TensorRT if not already present
 if [ ! -d "/workspace/VisoMaster/tensorrt_engine" ] || [ -z "$(ls -A /workspace/VisoMaster/tensorrt_engine)" ]; then
@@ -19,6 +35,9 @@ if [ ! -d "/workspace/VisoMaster/tensorrt_engine" ] || [ -z "$(ls -A /workspace/
   echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$TRT_HOME/lib' >> ~/.bashrc
   echo 'export LIBRARY_PATH=$LIBRARY_PATH:$TRT_HOME/lib' >> ~/.bashrc
   echo 'export CPATH=$CPATH:$TRT_HOME/include' >> ~/.bashrc
+  
+  # Source updated environment
+  source ~/.bashrc
 fi
 
 # Download inswapper model if needed
@@ -28,9 +47,9 @@ if [ ! -f "/workspace/VisoMaster/model_assets/inswapper_128_fp16.onnx" ]; then
 fi
 
 # Clean up any existing VNC processes
-pkill -f vnc || true
-pkill -f novnc || true
-rm -rf /tmp/.X*-lock /tmp/.X11-unix/* || true
+pkill -f vnc 2>/dev/null || true
+pkill -f novnc 2>/dev/null || true
+rm -rf /tmp/.X*-lock /tmp/.X11-unix/* 2>/dev/null || true
 
 # Setup VNC password
 mkdir -p "$HOME/.vnc"
@@ -43,35 +62,59 @@ chmod 600 $PASSWD_PATH
 
 # Start noVNC
 echo "Starting noVNC web client..."
-$NO_VNC_HOME/utils/novnc_proxy --vnc localhost:$VNC_PORT --listen $NO_VNC_PORT > $STARTUPDIR/no_vnc_startup.log 2>&1 &
-PID_SUB=$!
+if [ -d "$NO_VNC_HOME" ]; then
+  $NO_VNC_HOME/utils/novnc_proxy --vnc localhost:$VNC_PORT --listen $NO_VNC_PORT > $STARTUPDIR/no_vnc_startup.log 2>&1 &
+  PID_SUB=$!
+else
+  echo "WARNING: noVNC home directory not found"
+  # Keep a reference for wait command at the end
+  sleep infinity &
+  PID_SUB=$!
+fi
 
 # Start VNC server
 echo "Starting VNC server..."
-vncserver -kill $DISPLAY &> $STARTUPDIR/vnc_startup.log || rm -rfv /tmp/.X*-lock /tmp/.X11-unix &> $STARTUPDIR/vnc_startup.log || echo "No locks present"
-vncserver $DISPLAY -depth $VNC_COL_DEPTH -geometry $VNC_RESOLUTION PasswordFile=$HOME/.vnc/passwd --I-KNOW-THIS-IS-INSECURE -SecurityTypes None > $STARTUPDIR/no_vnc_startup.log 2>&1
+vncserver -kill $DISPLAY &> $STARTUPDIR/vnc_startup.log 2>/dev/null || true
+vncserver $DISPLAY -depth $VNC_COL_DEPTH -geometry $VNC_RESOLUTION PasswordFile=$HOME/.vnc/passwd -SecurityTypes None > $STARTUPDIR/no_vnc_startup.log 2>&1
 
 # Start window manager
 echo "Starting window manager..."
-$HOME/wm_startup.sh &> $STARTUPDIR/wm_startup.log &
+if [ -f "$HOME/wm_startup.sh" ]; then
+  $HOME/wm_startup.sh &> $STARTUPDIR/wm_startup.log &
+else
+  echo "WARNING: Window manager startup script not found"
+fi
 
 # Start additional services
 echo "Starting JupyterLab at port 8080..."
-jupyter lab --port 8080 --notebook-dir=/workspace --allow-root --no-browser --ip=0.0.0.0 --NotebookApp.token='' --NotebookApp.password='' > $STARTUPDIR/jupyter.log 2>&1 &
+if command -v jupyter &> /dev/null; then
+  jupyter lab --port 8080 --notebook-dir=/workspace --allow-root --no-browser --ip=0.0.0.0 --NotebookApp.token='' --NotebookApp.password='' > $STARTUPDIR/jupyter.log 2>&1 &
+else
+  echo "WARNING: JupyterLab not found"
+fi
 
 echo "Starting Filebrowser at port 8585..."
-filebrowser -r /workspace -p 8585 -a 0.0.0.0 --noauth > $STARTUPDIR/filebrowser.log 2>&1 &
+if command -v filebrowser &> /dev/null; then
+  filebrowser -r /workspace -p 8585 -a 0.0.0.0 --noauth > $STARTUPDIR/filebrowser.log 2>&1 &
+else
+  echo "WARNING: Filebrowser not found"
+fi
 
 # Start VisoMaster in the background
 echo "Starting VisoMaster..."
-cd /workspace/visomaster
-nohup python main.py > $STARTUPDIR/visomaster.log 2>&1 &
+if [ -f "/workspace/VisoMaster/main.py" ]; then
+  cd /workspace/VisoMaster
+  nohup python main.py > $STARTUPDIR/visomaster.log 2>&1 &
+else
+  echo "WARNING: VisoMaster main.py not found"
+fi
 
 echo "Setup complete! Services available at:"
 echo "- VNC: port 5901"
 echo "- Web VNC: port 6901"
 echo "- JupyterLab: port 8080"
 echo "- Filebrowser: port 8585"
+echo "- VisoMaster: Running in background"
 
 # Keep the script running
-tail -f /dev/null
+wait $PID_SUB
