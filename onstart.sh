@@ -16,13 +16,16 @@ export NO_VNC_HOME=/workspace/noVNC
 export STARTUPDIR=/dockerstartup
 export VNC_COL_DEPTH=24
 export VNC_RESOLUTION=1280x1024
-export VNC_PW=vncpassword
+export VNC_PW=""
 export VNC_PASSWORDLESS=true
 
 # Start SSH server if installed
 if [ -f /usr/sbin/sshd ]; then
   echo "Starting SSH server..."
   mkdir -p /var/run/sshd
+  # Start SSH with root login permitted and empty passwords allowed
+  sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+  sed -i 's/#PermitEmptyPasswords no/PermitEmptyPasswords yes/' /etc/ssh/sshd_config
   /usr/sbin/sshd || echo "WARNING: Failed to start SSH server"
 fi
 
@@ -56,20 +59,20 @@ pkill -f vnc 2>/dev/null || true
 pkill -f novnc 2>/dev/null || true
 rm -rf /tmp/.X*-lock /tmp/.X11-unix/* 2>/dev/null || true
 
-# Setup VNC password
+# Create empty VNC password file (completely disable authentication)
 mkdir -p "$HOME/.vnc"
 PASSWD_PATH="$HOME/.vnc/passwd"
 if [[ -f $PASSWD_PATH ]]; then
     rm -f $PASSWD_PATH
 fi
 
-echo "$VNC_PW" | vncpasswd -f >> $PASSWD_PATH
+touch $PASSWD_PATH
 chmod 600 $PASSWD_PATH
 
-# Start noVNC
-echo "Starting noVNC web client..."
+# Start noVNC with no security
+echo "Starting noVNC web client with NO SECURITY..."
 if [ -d "$NO_VNC_HOME" ]; then
-  $NO_VNC_HOME/utils/novnc_proxy --vnc localhost:$VNC_PORT --listen $NO_VNC_PORT > $LOG_DIR/novnc_startup.log 2>&1 &
+  $NO_VNC_HOME/utils/novnc_proxy --vnc localhost:$VNC_PORT --listen $NO_VNC_PORT --web $NO_VNC_HOME > $LOG_DIR/novnc_startup.log 2>&1 &
   PID_SUB=$!
 else
   echo "WARNING: noVNC home directory not found"
@@ -78,10 +81,12 @@ else
   PID_SUB=$!
 fi
 
-# Start VNC server
-echo "Starting VNC server..."
+# Start VNC server with all security disabled
+echo "Starting VNC server with NO SECURITY..."
 vncserver -kill $DISPLAY &> $LOG_DIR/vnc_startup.log 2>/dev/null || true
-vncserver $DISPLAY -depth $VNC_COL_DEPTH -geometry $VNC_RESOLUTION PasswordFile=$HOME/.vnc/passwd -SecurityTypes None > $LOG_DIR/vnc_startup.log 2>&1
+vncserver $DISPLAY -depth $VNC_COL_DEPTH -geometry $VNC_RESOLUTION -SecurityTypes None -localhost no > $LOG_DIR/vnc_startup.log 2>&1
+
+echo "VNC server started with NO SECURITY on port 5901"
 
 # Start window manager
 echo "Starting window manager..."
@@ -91,15 +96,15 @@ else
   echo "WARNING: Window manager startup script not found"
 fi
 
-# Start additional services
-echo "Starting JupyterLab at port 8080..."
+# Start additional services with no authentication
+echo "Starting JupyterLab at port 8080 with NO SECURITY..."
 if command -v jupyter &> /dev/null; then
   jupyter lab --port 8080 --notebook-dir=/workspace --allow-root --no-browser --ip=0.0.0.0 --NotebookApp.token='' --NotebookApp.password='' > $LOG_DIR/jupyter.log 2>&1 &
 else
   echo "WARNING: JupyterLab not found"
 fi
 
-echo "Starting Filebrowser at port 8585..."
+echo "Starting Filebrowser at port 8585 with NO SECURITY..."
 if command -v filebrowser &> /dev/null; then
   filebrowser -r /workspace -p 8585 -a 0.0.0.0 --noauth > $LOG_DIR/filebrowser.log 2>&1 &
 else
@@ -115,11 +120,12 @@ else
   echo "WARNING: VisoMaster main.py not found"
 fi
 
-echo "Setup complete! Services available at:"
-echo "- VNC: port 5901"
-echo "- Web VNC: port 6901"
-echo "- JupyterLab: port 8080"
-echo "- Filebrowser: port 8585"
+echo "Setup complete! ALL SECURITY DISABLED!"
+echo "Services available at:"
+echo "- VNC: port 5901 (NO SECURITY)"
+echo "- Web VNC: port 6901 (NO SECURITY)"
+echo "- JupyterLab: port 8080 (NO SECURITY)"
+echo "- Filebrowser: port 8585 (NO SECURITY)"
 echo "- VisoMaster: Running in background"
 echo "- All logs are saved in: /workspace/logs/"
 
