@@ -45,9 +45,16 @@ if [ ! -f "/workspace/VisoMaster/model_assets/inswapper_128_fp16.onnx" ]; then
   wget -O /workspace/VisoMaster/model_assets/inswapper_128_fp16.onnx https://huggingface.co/Red1618/Viso/resolve/main/inswapper_128_fp16.onnx?download=true
 fi
 
-# Set standard environment variables for VNC
-export VNC_PASSWORDLESS=${VNC_PASSWORDLESS:-true}
+# Set required environment variables for VNC
+export DISPLAY=${DISPLAY:-:1}
+export VNC_PORT=${VNC_PORT:-5901}
+export NO_VNC_PORT=${NO_VNC_PORT:-6901}
+export NO_VNC_HOME=${NO_VNC_HOME:-/workspace/noVNC}
+export STARTUPDIR=${STARTUPDIR:-/dockerstartup}
+export VNC_COL_DEPTH=${VNC_COL_DEPTH:-24}
 export VNC_RESOLUTION=${VNC_RESOLUTION:-1280x1024}
+export VNC_PW=${VNC_PW:-vncpassword}
+export VNC_PASSWORDLESS=${VNC_PASSWORDLESS:-true}
 
 # Clean up any existing VNC processes
 echo "Cleaning up any existing VNC processes..."
@@ -55,12 +62,41 @@ pkill -f vnc || true
 pkill -f novnc || true
 rm -rf /tmp/.X*-lock /tmp/.X11-unix/* || true
 
-# Start VNC server - using the direct approach from the original repo
-echo "Starting VNC server and services..."
-/dockerstartup/vnc_startup.sh &
+# Start VNC in a modified way that doesn't block
+echo "Starting VNC and services..."
+# Start noVNC
+$NO_VNC_HOME/utils/novnc_proxy --vnc localhost:$VNC_PORT --listen $NO_VNC_PORT > $STARTUPDIR/no_vnc_startup.log 2>&1 &
+PID_SUB=$!
 
-# Give VNC time to initialize
-sleep 5
+# Kill any existing VNC server
+vncserver -kill $DISPLAY &> $STARTUPDIR/vnc_startup.log || rm -rfv /tmp/.X*-lock /tmp/.X11-unix &> $STARTUPDIR/vnc_startup.log || echo "no locks present"
+
+# Start VNC server
+echo "Starting VNC server with depth=$VNC_COL_DEPTH, resolution=$VNC_RESOLUTION"
+vnc_cmd="vncserver $DISPLAY -depth $VNC_COL_DEPTH -geometry $VNC_RESOLUTION PasswordFile=$HOME/.vnc/passwd --I-KNOW-THIS-IS-INSECURE"
+if [[ ${VNC_PASSWORDLESS:-} == "true" ]]; then
+  vnc_cmd="${vnc_cmd} -SecurityTypes None"
+fi
+$vnc_cmd > $STARTUPDIR/no_vnc_startup.log 2>&1
+
+# Start window manager
+echo "Starting window manager..."
+$HOME/wm_startup.sh &> $STARTUPDIR/wm_startup.log &
+
+# Give VNC a moment to initialize
+sleep 3
+
+# Start JupyterLab
+echo "Starting JupyterLab at port 8080..."
+nohup jupyter lab --port 8080 --notebook-dir=/workspace --allow-root --no-browser --ip=0.0.0.0 --NotebookApp.token='' --NotebookApp.password='' > $STARTUPDIR/jupyter.log 2>&1 &
+
+# Start Filebrowser
+echo "Starting Filebrowser at port 8585..."
+nohup filebrowser -r /workspace -p 8585 -a 0.0.0.0 --noauth > $STARTUPDIR/filebrowser.log 2>&1 &
+
+# Start VisoMaster in the background
+echo "Starting VisoMaster..."
+nohup python /workspace/visomaster/main.py > $STARTUPDIR/visomaster.log 2>&1 &
 
 echo "Setup complete! Services available at:"
 echo "- VNC: port 5901"
@@ -70,9 +106,5 @@ echo "- Filebrowser: port 8585"
 echo ""
 echo "You can connect to these services using the vast.ai connection links"
 
-# Keep the script running indefinitely to prevent container shutdown
-if [ -z "$1" ]; then
-  echo "Keeping container alive..."
-  # This approach avoids issues with tmux and terminal requirements
-  tail -f /dev/null
-fi
+# Keep the script running
+wait $PID_SUB
