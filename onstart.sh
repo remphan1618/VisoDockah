@@ -13,11 +13,12 @@ export DISPLAY=:1
 export VNC_PORT=5901
 export NO_VNC_PORT=6901
 export NO_VNC_HOME=/workspace/noVNC 
-export STARTUPDIR=/dockerstartup
+export STARTUPDIR=/
 export VNC_COL_DEPTH=24
 export VNC_RESOLUTION=1280x1024
 export VNC_PW=""
 export VNC_PASSWORDLESS=true
+export JUPYTER_DIR=/
 
 # Start SSH server if installed
 if [ -f /usr/sbin/sshd ]; then
