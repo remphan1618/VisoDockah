@@ -4,6 +4,9 @@ set -e
 
 echo "Starting VisoMaster setup and services..."
 
+# Add environment variables to /etc/environment (crucial for vast.ai)
+env | grep _ >> /etc/environment || true
+
 # Start SSH server if present
 if [ -f /usr/sbin/sshd ]; then
   echo "Starting SSH server..."
@@ -42,15 +45,34 @@ if [ ! -f "/workspace/VisoMaster/model_assets/inswapper_128_fp16.onnx" ]; then
   wget -O /workspace/VisoMaster/model_assets/inswapper_128_fp16.onnx https://huggingface.co/Red1618/Viso/resolve/main/inswapper_128_fp16.onnx?download=true
 fi
 
-# Start VNC server and other services at the end of your onstart.sh
-echo "Starting VNC and services..."
-nohup /dockerstartup/vnc_startup.sh > /workspace/vnc_startup.log 2>&1 &
+# Set standard environment variables for VNC
+export VNC_PASSWORDLESS=${VNC_PASSWORDLESS:-true}
+export VNC_RESOLUTION=${VNC_RESOLUTION:-1280x1024}
 
-echo "Setup complete! Services started:"
-echo "- SSH server (running on port 22)"
-echo "- VNC server (running on port 5901)"
-echo "- noVNC web client (running on port 6901)"
-echo "- JupyterLab (running on port 8080)"
-echo "- Filebrowser (running on port 8585)"
+# Clean up any existing VNC processes
+echo "Cleaning up any existing VNC processes..."
+pkill -f vnc || true
+pkill -f novnc || true
+rm -rf /tmp/.X*-lock /tmp/.X11-unix/* || true
+
+# Start VNC server - using the direct approach from the original repo
+echo "Starting VNC server and services..."
+/dockerstartup/vnc_startup.sh &
+
+# Give VNC time to initialize
+sleep 5
+
+echo "Setup complete! Services available at:"
+echo "- VNC: port 5901"
+echo "- Web VNC: port 6901"
+echo "- JupyterLab: port 8080"
+echo "- Filebrowser: port 8585"
 echo ""
 echo "You can connect to these services using the vast.ai connection links"
+
+# Keep the script running indefinitely to prevent container shutdown
+if [ -z "$1" ]; then
+  echo "Keeping container alive..."
+  # This approach avoids issues with tmux and terminal requirements
+  tail -f /dev/null
+fi
