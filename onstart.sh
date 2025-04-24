@@ -85,7 +85,7 @@ fi
 # Start VNC server with all security disabled
 echo "Starting VNC server with NO SECURITY..."
 vncserver -kill $DISPLAY &> $LOG_DIR/vnc_startup.log 2>/dev/null || true
-vncserver $DISPLAY -depth $VNC_COL_DEPTH -geometry $VNC_RESOLUTION -SecurityTypes None -localhost no > $LOG_DIR/vnc_startup.log 2>&1
+vncserver $DISPLAY -depth $VNC_COL_DEPTH -geometry $VNC_RESOLUTION -SecurityTypes None -localhost no --I-KNOW-THIS-IS-INSECURE > $LOG_DIR/vnc_startup.log 2>&1
 
 echo "VNC server started with NO SECURITY on port 5901"
 
