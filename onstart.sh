@@ -5,17 +5,14 @@ echo "Starting VisoMaster environment setup..."
 env | grep _ >> /etc/environment
 
 # Set VNC environment variables
-export DISPLAY=:1
+export DISPLAY=:0
 export VNC_PORT=5901
 export NO_VNC_PORT=6901
 export NO_VNC_HOME=/workspace/noVNC 
 export STARTUPDIR=/dockerstartup
-# Create startup directory for logs if it doesn't exist
-mkdir -p $STARTUPDIR
-
 export VNC_COL_DEPTH=24
 export VNC_RESOLUTION=1280x1024
-export VNC_PW=vncpassword
+export VNC_PW=1234
 export VNC_PASSWORDLESS=true
 
 # Start SSH server if installed
