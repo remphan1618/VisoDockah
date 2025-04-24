@@ -41,3 +41,16 @@ if [ ! -f "/workspace/VisoMaster/model_assets/inswapper_128_fp16.onnx" ]; then
   echo "Downloading inswapper model..."
   wget -O /workspace/VisoMaster/model_assets/inswapper_128_fp16.onnx https://huggingface.co/Red1618/Viso/resolve/main/inswapper_128_fp16.onnx?download=true
 fi
+
+# Start VNC server and other services at the end of your onstart.sh
+echo "Starting VNC and services..."
+nohup /dockerstartup/vnc_startup.sh > /workspace/vnc_startup.log 2>&1 &
+
+echo "Setup complete! Services started:"
+echo "- SSH server (running on port 22)"
+echo "- VNC server (running on port 5901)"
+echo "- noVNC web client (running on port 6901)"
+echo "- JupyterLab (running on port 8080)"
+echo "- Filebrowser (running on port 8585)"
+echo ""
+echo "You can connect to these services using the vast.ai connection links"
