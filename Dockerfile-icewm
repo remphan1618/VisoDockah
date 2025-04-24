@@ -1,48 +1,101 @@
 FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
 
 ENV REFRESHED_AT 2024-08-12
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=Pacific/Auckland
 
-# Install only essential packages upfront
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    wget git python3 python3-pip \
-    icewm tigervnc-standalone-server tigervnc-common \
-    firefox ffmpeg fonts-wqy-zenhei unzip \
-    openssh-server openssh-client openssh-sftp-server \
-    sudo tmux novnc websockify && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+LABEL io.k8s.description="Headless VNC Container with IceWM window manager" \
+      io.k8s.display-name="Headless VNC Container based on Debian" \
+      io.openshift.expose-services="6901:http,5901:xvnc,8080:jupyter,8585:filebrowser" \
+      io.openshift.tags="vnc, debian, icewm"
 
-# Setup SSH server
-RUN mkdir -p /var/run/sshd && \
-    echo 'root:vncpassword' | chpasswd && \
-    sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
-    sed -i 's/#PermitRootLogin yes/PermitRootLogin yes/' /etc/ssh/sshd_config && \
-    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
-    sed -i 's/^#\?X11Forwarding no/X11Forwarding yes/' /etc/ssh/sshd_config
+### Connection ports for controlling the UI:
+### VNC port:5901
+### noVNC webport, connect via http://IP:6901/?password=vncpassword
+ENV DISPLAY=:1 \
+    VNC_PORT=5901 \
+    NO_VNC_PORT=6901
+EXPOSE $VNC_PORT $NO_VNC_PORT
 
-# Setup basic environment
-ENV HOME=/workspace
-ENV DISPLAY=:1
-ENV VNC_PORT=5901
-ENV NO_VNC_PORT=6901
+### Environment config
+ENV HOME=/workspace \
+    TERM=xterm \
+    STARTUPDIR=/dockerstartup \
+    INST_SCRIPTS=/workspace/install \
+    NO_VNC_HOME=/workspace/noVNC \
+    DEBIAN_FRONTEND=noninteractive \
+    VNC_COL_DEPTH=24 \
+    VNC_PW="" \
+    VNC_PASSWORDLESS=true \
+    VNC_VIEW_ONLY=false \
+    TZ=Pacific/Auckland
 WORKDIR $HOME
 
-# Setup VNC and window manager
-COPY ./src/debian/icewm/ $HOME/
+### Install necessary dependencies
+RUN apt-get update && apt-get install -y \
+    wget \
+    git \
+    build-essential \
+    software-properties-common \
+    apt-transport-https \
+    ca-certificates \
+    unzip \
+    ffmpeg \
+    jq \
+    icewm \
+    openssh-server \
+    openssh-client \
+    openssh-sftp-server \
+    vim \
+    net-tools \
+    tmux \
+    tzdata && \
+    ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
+    dpkg-reconfigure -f noninteractive tzdata && \
+    rm -rf /var/lib/apt/lists/*
+
+### Clone the repository to get all the scripts
+WORKDIR /tmp
+RUN git clone https://github.com/visomaster/VisoMaster.git
+RUN mkdir -p $INST_SCRIPTS/
+WORKDIR /tmp/VisoMaster
+
+### Add all install scripts for further steps
+RUN if [ -d "./src/common/install" ]; then cp -r ./src/common/install/* $INST_SCRIPTS/; fi
+RUN if [ -d "./src/debian/install" ]; then cp -r ./src/debian/install/* $INST_SCRIPTS/; fi
+RUN chmod +x $INST_SCRIPTS/*.sh
+
+### Install some common tools
+RUN $INST_SCRIPTS/tools.sh
+ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en' LC_ALL='en_US.UTF-8'
+
+### Install custom fonts
+RUN $INST_SCRIPTS/install_custom_fonts.sh
+
+### Install xvnc-server & noVNC - HTML5 based VNC viewer
+RUN $INST_SCRIPTS/tigervnc.sh
+RUN $INST_SCRIPTS/no_vnc_1.5.0.sh
+
+### Install firefox
+RUN $INST_SCRIPTS/firefox.sh
+
+### Configure IceWM UI
+RUN if [ -d "/tmp/VisoMaster/src/debian/icewm" ]; then \
+    cp -r /tmp/VisoMaster/src/debian/icewm/* $HOME/; \
+else \
+    mkdir -p $HOME; \
+    echo '#!/usr/bin/env bash\n/usr/bin/icewm-session > $HOME/wm.log &' > $HOME/wm_startup.sh; \
+fi
 RUN chmod +x $HOME/wm_startup.sh
-RUN mkdir -p $HOME/.vnc $HOME/.icewm /dockerstartup
 
-# Setup minimal startup script
-COPY ./src/common/scripts/ /dockerstartup/
-# Create a simple entrypoint script that can be overridden by vast.ai
-RUN echo '#!/bin/bash' > /dockerstartup/entrypoint.sh && \
-    echo 'echo "Container started. Use vast.ai onstart script for full initialization."' >> /dockerstartup/entrypoint.sh && \
-    echo 'tail -f /dev/null' >> /dockerstartup/entrypoint.sh && \
-    chmod +x /dockerstartup/entrypoint.sh
+### Configure startup
+RUN $INST_SCRIPTS/libnss_wrapper.sh
+RUN mkdir -p $STARTUPDIR/common/scripts
+RUN if [ -d "/tmp/VisoMaster/src/common/scripts" ]; then \
+    cp -r /tmp/VisoMaster/src/common/scripts/* $STARTUPDIR/common/scripts/; \
+fi
+RUN chmod +x $STARTUPDIR/common/scripts/*
+RUN $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
 
-# Clone VisoMaster repository
+### Clone VisoMaster repository
 WORKDIR /workspace
 RUN git clone -b v0.1.6 https://github.com/visomaster/VisoMaster.git && \
     mkdir -p /workspace/VisoMaster/Image \
@@ -51,7 +104,11 @@ RUN git clone -b v0.1.6 https://github.com/visomaster/VisoMaster.git && \
     /workspace/VisoMaster/model_assets \
     /workspace/VisoMaster/tensorrt_engine
 
-# Install Python dependencies
+### Install Python with pip
+RUN apt-get update && apt-get install -y python3 python3-pip && \
+    rm -rf /var/lib/apt/lists/*
+
+### Install Python dependencies
 WORKDIR /workspace/VisoMaster
 RUN pip install --no-cache-dir torch==2.4.1+cu124 --index-url https://download.pytorch.org/whl/cu124 && \
     pip install --no-cache-dir -r requirements_cu124.txt && \
@@ -59,29 +116,41 @@ RUN pip install --no-cache-dir torch==2.4.1+cu124 --index-url https://download.p
     pip install --no-cache-dir onnxruntime-gpu==1.19.0 && \
     pip cache purge
 
-# Download models (keeping these in the Docker image)
+### Download models
 RUN python3 download_models.py
 
-# Set environment variables for TensorRT (actual download happens via vast.ai onstart script)
+### Set environment variables for TensorRT
 ENV TRT_HOME=/workspace/VisoMaster/tensorrt_engine
 ENV PATH=${TRT_HOME}/bin:${PATH}
 ENV LD_LIBRARY_PATH=${TRT_HOME}/lib:${LD_LIBRARY_PATH}
 ENV LIBRARY_PATH=${TRT_HOME}/lib:${LIBRARY_PATH}
 ENV CPATH=${TRT_HOME}/include:${CPATH}
 
-# Install jupyterlab and filebrowser
+### Install jupyterlab and filebrowser
 RUN pip install --no-cache-dir jupyterlab && \
     wget -O - https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash && \
     pip cache purge
+EXPOSE 8080 8585 22
 
-# Clean system to free space
-RUN apt-get clean && \
-    rm -rf /var/lib/apt/lists/* && \
-    rm -rf /tmp/* && \
-    rm -rf /var/tmp/*
+### Setup SSH server
+RUN mkdir -p /var/run/sshd && \
+    echo 'root:vncpassword' | chpasswd && \
+    sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PermitRootLogin yes/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
+    sed -i 's/^#\?X11Forwarding no/X11Forwarding yes/' /etc/ssh/sshd_config
 
-# Expose ports
-EXPOSE $VNC_PORT $NO_VNC_PORT 8080 8585
+### Copy the onstart.sh to both an executable location and an editable location
+COPY ./onstart.sh $STARTUPDIR/entrypoint.sh
+COPY ./onstart.sh /workspace/onstart.sh
+RUN chmod +x $STARTUPDIR/entrypoint.sh
+RUN chmod +x /workspace/onstart.sh
 
-# Use simple entrypoint script instead of vnc_startup.sh
+### Create a script to reload the onstart.sh after editing
+RUN echo '#!/bin/bash\ncp /workspace/onstart.sh $STARTUPDIR/entrypoint.sh\nchmod +x $STARTUPDIR/entrypoint.sh\necho "Startup script updated successfully."' > /workspace/update_startup.sh
+RUN chmod +x /workspace/update_startup.sh
+
+### Clean up temporary files
+RUN rm -rf /tmp/VisoMaster
+
 ENTRYPOINT ["/dockerstartup/entrypoint.sh"]
