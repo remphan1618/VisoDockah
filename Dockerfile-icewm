@@ -47,23 +47,33 @@ RUN apt-get update && apt-get install -y \
     vim \
     net-tools \
     tmux \
+    locales \
+    sudo \
+    rsync \
     tzdata && \
     ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
     dpkg-reconfigure -f noninteractive tzdata && \
+    mkdir -p /tmp && chmod 1777 /tmp && \
     rm -rf /var/lib/apt/lists/*
 
-### Clone the repository to get all the scripts
-WORKDIR /tmp
-RUN git clone https://github.com/remphan1618/VisoDockah.git
-WORKDIR /tmp/VisoDockah
+### Configure SSH server (vast.ai compatibility)
+RUN sed -i "s/StrictModes yes/StrictModes no/g" /etc/ssh/sshd_config && \
+    echo ClientAliveInterval 10 >> /etc/ssh/sshd_config && \
+    echo ClientAliveCountMax 2 >> /etc/ssh/sshd_config && \
+    echo UsePAM no >> /etc/ssh/sshd_config && \
+    echo ChallengeResponseAuthentication no >> /etc/ssh/sshd_config && \
+    echo Banner /etc/banner >> /etc/ssh/sshd_config && \
+    echo 'LogLevel VERBOSE' >> /etc/ssh/sshd_config && \
+    echo 'Welcome to vast.ai and VisoMaster. If authentication fails, try again after a few seconds, and double check your ssh key.' > /etc/banner && \
+    echo 'Have fun!' >> /etc/banner
 
 ### Create installation script directory
 RUN mkdir -p $INST_SCRIPTS/
 
-### Copy installation scripts from the cloned repository
-RUN cp -r ./src/common/install/*.sh $INST_SCRIPTS/ && \
-    cp -r ./src/debian/install/*.sh $INST_SCRIPTS/ && \
-    ls -la $INST_SCRIPTS/
+### Copy installation scripts from the LOCAL src directory
+COPY src/common/install/*.sh $INST_SCRIPTS/
+COPY src/debian/install/*.sh $INST_SCRIPTS/
+RUN ls -la $INST_SCRIPTS/
 
 ### Make scripts executable
 RUN chmod +x $INST_SCRIPTS/*.sh
@@ -91,20 +101,18 @@ RUN mkdir -p $HOME && \
 RUN $INST_SCRIPTS/libnss_wrapper.sh
 RUN mkdir -p $STARTUPDIR/common/scripts
 
-### Copy generate_container_user script from the cloned repository
-RUN cp -r ./src/common/scripts/generate_container_user $STARTUPDIR/common/scripts/ && \
-    chmod +x $STARTUPDIR/common/scripts/generate_container_user
+### Copy generate_container_user script from the LOCAL src
+COPY src/common/scripts/generate_container_user $STARTUPDIR/common/scripts/
+RUN chmod +x $STARTUPDIR/common/scripts/generate_container_user
 
 RUN $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
 
-### Clone VisoMaster repository
+### Copy local VisoMaster contents instead of cloning
 WORKDIR /workspace
-RUN git clone -b v0.1.6 https://github.com/visomaster/VisoMaster.git && \
-    mkdir -p /workspace/VisoMaster/Image \
+COPY VisoMaster-0.1.6 /workspace/VisoMaster
+RUN mkdir -p /workspace/VisoMaster/Image \
     /workspace/VisoMaster/Video \
-    /workspace/VisoMaster/Output \
-    /workspace/VisoMaster/model_assets \
-    /workspace/VisoMaster/tensorrt_engine
+    /workspace/VisoMaster/Output
 
 ### Install Python with pip
 RUN apt-get update && apt-get install -y python3 python3-pip && \
@@ -136,15 +144,28 @@ EXPOSE 8080 8585 22
 
 ### Setup SSH server
 RUN mkdir -p /var/run/sshd && \
-    echo 'root:vncpassword' | chpasswd && \
-    sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
-    sed -i 's/#PermitRootLogin yes/PermitRootLogin yes/' /etc/ssh/sshd_config && \
-    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
-    sed -i 's/^#\?X11Forwarding no/X11Forwarding yes/' /etc/ssh/sshd_config
+    echo 'root:vncpassword' | chpasswd
 
-### Create startup script
+### Create startup script with proper signal handling
 RUN mkdir -p $STARTUPDIR
 RUN echo '#!/bin/bash' > $STARTUPDIR/entrypoint.sh && \
+    echo '' >> $STARTUPDIR/entrypoint.sh && \
+    echo '# Handle termination signals properly' >> $STARTUPDIR/entrypoint.sh && \
+    echo 'cleanup() {' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  echo "Caught SIGTERM/SIGINT! Cleaning up..."' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  pkill -f vnc 2>/dev/null || true' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  pkill -f novnc 2>/dev/null || true' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  pkill -f jupyter 2>/dev/null || true' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  pkill -f filebrowser 2>/dev/null || true' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  pkill -f python 2>/dev/null || true' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  kill -TERM $PID_SUB 2>/dev/null || true' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  kill $(jobs -p) 2>/dev/null || true' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  exit 0' >> $STARTUPDIR/entrypoint.sh && \
+    echo '}' >> $STARTUPDIR/entrypoint.sh && \
+    echo '' >> $STARTUPDIR/entrypoint.sh && \
+    echo '# Set up signal traps' >> $STARTUPDIR/entrypoint.sh && \
+    echo 'trap cleanup SIGTERM SIGINT' >> $STARTUPDIR/entrypoint.sh && \
+    echo '' >> $STARTUPDIR/entrypoint.sh && \
     echo 'echo "Starting VisoMaster environment setup..."' >> $STARTUPDIR/entrypoint.sh && \
     echo '' >> $STARTUPDIR/entrypoint.sh && \
     echo '# Create logs directory in workspace' >> $STARTUPDIR/entrypoint.sh && \
@@ -153,6 +174,19 @@ RUN echo '#!/bin/bash' > $STARTUPDIR/entrypoint.sh && \
     echo '' >> $STARTUPDIR/entrypoint.sh && \
     echo '# Save environment variables for any service that needs them' >> $STARTUPDIR/entrypoint.sh && \
     echo 'env | grep _ >> /etc/environment' >> $STARTUPDIR/entrypoint.sh && \
+    echo '' >> $STARTUPDIR/entrypoint.sh && \
+    echo '# Set up vast.ai container label if present' >> $STARTUPDIR/entrypoint.sh && \
+    echo 'if [ -f ~/.vast_containerlabel ]; then' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  echo "VAST_CONTAINERLABEL=\"$(cat ~/.vast_containerlabel)\"" >> /root/.bashrc' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  export VAST_CONTAINERLABEL="$(cat ~/.vast_containerlabel)"' >> $STARTUPDIR/entrypoint.sh && \
+    echo 'fi' >> $STARTUPDIR/entrypoint.sh && \
+    echo '' >> $STARTUPDIR/entrypoint.sh && \
+    echo '# Start SSH server' >> $STARTUPDIR/entrypoint.sh && \
+    echo 'if [ -f /usr/sbin/sshd ]; then' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  echo "Starting SSH server..."' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  mkdir -p /var/run/sshd' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  /usr/sbin/sshd' >> $STARTUPDIR/entrypoint.sh && \
+    echo 'fi' >> $STARTUPDIR/entrypoint.sh && \
     echo '' >> $STARTUPDIR/entrypoint.sh && \
     echo '# Set VNC environment variables' >> $STARTUPDIR/entrypoint.sh && \
     echo 'export DISPLAY=:1' >> $STARTUPDIR/entrypoint.sh && \
@@ -170,50 +204,36 @@ RUN echo '#!/bin/bash' > $STARTUPDIR/entrypoint.sh && \
     echo '  source $STARTUPDIR/common/scripts/generate_container_user' >> $STARTUPDIR/entrypoint.sh && \
     echo 'fi' >> $STARTUPDIR/entrypoint.sh && \
     echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Start SSH server if installed' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'if [ -f /usr/sbin/sshd ]; then' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  echo "Starting SSH server..."' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  mkdir -p /var/run/sshd' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  # Start SSH with root login permitted and empty passwords allowed' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  sed -i '"'"'s/#PermitRootLogin prohibit-password/PermitRootLogin yes/'"'"' /etc/ssh/sshd_config' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  sed -i '"'"'s/#PermitEmptyPasswords no/PermitEmptyPasswords yes/'"'"' /etc/ssh/sshd_config' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  /usr/sbin/sshd || echo "WARNING: Failed to start SSH server"' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'fi' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
     echo '# Fix user permissions for critical directories' >> $STARTUPDIR/entrypoint.sh && \
     echo 'if [ -f "$INST_SCRIPTS/set_user_permission.sh" ]; then' >> $STARTUPDIR/entrypoint.sh && \
     echo '  echo "Setting proper permissions on critical directories..."' >> $STARTUPDIR/entrypoint.sh && \
     echo '  bash $INST_SCRIPTS/set_user_permission.sh /workspace /workspace/VisoMaster /workspace/VisoMaster/tensorrt_engine' >> $STARTUPDIR/entrypoint.sh && \
     echo 'fi' >> $STARTUPDIR/entrypoint.sh && \
     echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Download TensorRT if not already present' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'if [ ! -d "/workspace/VisoMaster/tensorrt_engine" ] || [ -z "$(ls -A /workspace/VisoMaster/tensorrt_engine)" ]; then' >> $STARTUPDIR/entrypoint.sh && \
+    echo '# Copy local TensorRT if provided' >> $STARTUPDIR/entrypoint.sh && \
+    echo 'if [ -f "/workspace/TensorRT-10.9.0.34.Linux.x86_64-gnu.cuda-12.8.tar.gz" ]; then' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  echo "Using local TensorRT package..."' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  mkdir -p /workspace/VisoMaster/tensorrt_engine' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  tar -xzf /workspace/TensorRT-10.9.0.34.Linux.x86_64-gnu.cuda-12.8.tar.gz -C /workspace/VisoMaster/tensorrt_engine --strip-components=1' >> $STARTUPDIR/entrypoint.sh && \
+    echo 'elif [ ! -d "/workspace/VisoMaster/tensorrt_engine" ] || [ -z "$(ls -A /workspace/VisoMaster/tensorrt_engine)" ]; then' >> $STARTUPDIR/entrypoint.sh && \
     echo '  echo "Downloading TensorRT..."' >> $STARTUPDIR/entrypoint.sh && \
     echo '  mkdir -p /workspace/VisoMaster/tensorrt_engine' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  ' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  if [ -f "/workspace/TensorRT-10.9.0.34.Linux.x86_64-gnu.cuda-12.8.tar.gz" ]; then' >> $STARTUPDIR/entrypoint.sh && \
-    echo '    # Use local file if it exists' >> $STARTUPDIR/entrypoint.sh && \
-    echo '    echo "Using local TensorRT package..."' >> $STARTUPDIR/entrypoint.sh && \
-    echo '    tar -xzf /workspace/TensorRT-10.9.0.34.Linux.x86_64-gnu.cuda-12.8.tar.gz -C /workspace/VisoMaster/tensorrt_engine --strip-components=1' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  else' >> $STARTUPDIR/entrypoint.sh && \
-    echo '    # Download from HuggingFace' >> $STARTUPDIR/entrypoint.sh && \
-    echo '    wget --progress=dot:giga -O /tmp/TensorRT.tar.gz https://huggingface.co/Red1618/Viso/resolve/main/TensorRT-10.9.0.34.Linux.x86_64-gnu.cuda-12.8.tar.gz?download=true' >> $STARTUPDIR/entrypoint.sh && \
-    echo '    tar -xzf /tmp/TensorRT.tar.gz -C /workspace/VisoMaster/tensorrt_engine --strip-components=1' >> $STARTUPDIR/entrypoint.sh && \
-    echo '    rm -f /tmp/TensorRT.tar.gz' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  fi' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  wget --progress=dot:giga -O /tmp/TensorRT.tar.gz https://huggingface.co/Red1618/Viso/resolve/main/TensorRT-10.9.0.34.Linux.x86_64-gnu.cuda-12.8.tar.gz?download=true' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  tar -xzf /tmp/TensorRT.tar.gz -C /workspace/VisoMaster/tensorrt_engine --strip-components=1' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  rm -f /tmp/TensorRT.tar.gz' >> $STARTUPDIR/entrypoint.sh && \
+    echo 'else' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  echo "TensorRT already installed"' >> $STARTUPDIR/entrypoint.sh && \
     echo 'fi' >> $STARTUPDIR/entrypoint.sh && \
     echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Download inswapper model if needed' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'if [ ! -f "/workspace/VisoMaster/model_assets/inswapper_128_fp16.onnx" ]; then' >> $STARTUPDIR/entrypoint.sh && \
+    echo '# Copy local inswapper model if provided' >> $STARTUPDIR/entrypoint.sh && \
+    echo 'if [ -f "/workspace/inswapper_128_fp16.onnx" ]; then' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  echo "Using local inswapper model..."' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  cp /workspace/inswapper_128_fp16.onnx /workspace/VisoMaster/model_assets/inswapper_128_fp16.onnx' >> $STARTUPDIR/entrypoint.sh && \
+    echo 'elif [ ! -f "/workspace/VisoMaster/model_assets/inswapper_128_fp16.onnx" ]; then' >> $STARTUPDIR/entrypoint.sh && \
     echo '  echo "Downloading inswapper model..."' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  if [ -f "/workspace/inswapper_128_fp16.onnx" ]; then' >> $STARTUPDIR/entrypoint.sh && \
-    echo '    # Use local file if it exists' >> $STARTUPDIR/entrypoint.sh && \
-    echo '    echo "Using local inswapper model..."' >> $STARTUPDIR/entrypoint.sh && \
-    echo '    cp /workspace/inswapper_128_fp16.onnx /workspace/VisoMaster/model_assets/inswapper_128_fp16.onnx' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  else' >> $STARTUPDIR/entrypoint.sh && \
-    echo '    # Download from HuggingFace' >> $STARTUPDIR/entrypoint.sh && \
-    echo '    wget -O /workspace/VisoMaster/model_assets/inswapper_128_fp16.onnx https://huggingface.co/Red1618/Viso/resolve/main/inswapper_128_fp16.onnx?download=true' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  fi' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  wget -O /workspace/VisoMaster/model_assets/inswapper_128_fp16.onnx https://huggingface.co/Red1618/Viso/resolve/main/inswapper_128_fp16.onnx?download=true' >> $STARTUPDIR/entrypoint.sh && \
+    echo 'else' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  echo "Inswapper model already installed"' >> $STARTUPDIR/entrypoint.sh && \
     echo 'fi' >> $STARTUPDIR/entrypoint.sh && \
     echo '' >> $STARTUPDIR/entrypoint.sh && \
     echo '# Clean up any existing VNC processes' >> $STARTUPDIR/entrypoint.sh && \
@@ -294,8 +314,16 @@ RUN echo '#!/bin/bash' > $STARTUPDIR/entrypoint.sh && \
     echo 'echo "- All logs are saved in: /workspace/logs/"' >> $STARTUPDIR/entrypoint.sh && \
     echo 'echo "- Root filesystem accessible via /workspace/root symlink"' >> $STARTUPDIR/entrypoint.sh && \
     echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Keep the script running' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'wait $PID_SUB' >> $STARTUPDIR/entrypoint.sh && \
+    echo '# Keep the script running but allow it to be properly terminated' >> $STARTUPDIR/entrypoint.sh && \
+    echo 'while true; do' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  # Check if the main PID is still running' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  if ! ps -p $PID_SUB > /dev/null; then' >> $STARTUPDIR/entrypoint.sh && \
+    echo '    echo "Main process exited, restarting it..."' >> $STARTUPDIR/entrypoint.sh && \
+    echo '    sleep infinity &' >> $STARTUPDIR/entrypoint.sh && \
+    echo '    PID_SUB=$!' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  fi' >> $STARTUPDIR/entrypoint.sh && \
+    echo '  sleep 10' >> $STARTUPDIR/entrypoint.sh && \
+    echo 'done' >> $STARTUPDIR/entrypoint.sh && \
     chmod +x $STARTUPDIR/entrypoint.sh
 
 ### Copy the entrypoint.sh to an editable location
@@ -306,7 +334,17 @@ RUN cp $STARTUPDIR/entrypoint.sh /workspace/onstart.sh && \
 RUN echo '#!/bin/bash\ncp /workspace/onstart.sh $STARTUPDIR/entrypoint.sh\nchmod +x $STARTUPDIR/entrypoint.sh\necho "Startup script updated successfully."' > /workspace/update_startup.sh && \
     chmod +x /workspace/update_startup.sh
 
-### Clean up temporary files
-RUN rm -rf /tmp/VisoDockah
+### Copy the local icewm startup script if available
+COPY src/debian/icewm/wm_startup.sh $HOME/wm_startup.sh || true
+RUN chmod +x $HOME/wm_startup.sh || true
 
-ENTRYPOINT ["/dockerstartup/entrypoint.sh"]
+### Copy local onstart.sh if available
+COPY onstart.sh /workspace/onstart.sh || true
+RUN cp -f /workspace/onstart.sh $STARTUPDIR/entrypoint.sh || true
+RUN chmod +x $STARTUPDIR/entrypoint.sh
+
+# Add vast.ai bash configuration
+RUN echo 'PS1="\[\e]0;\u@$VAST_CONTAINERLABEL: \w\a\]\[\e[01;34m\]\u\[\e[m\e[01m\]@\[\e[01;36m\]$VAST_CONTAINERLABEL\[\e[m\e[01m\]:\[\e[01;37m\]\w\$\[\e[m\] " ; if [ ! -e "$HOME/.no_auto_tmux" ] && [[ -z "$TMUX" ]] && [ "$SSH_CONNECTION" != "" ] && [ "$TMUX_STARTED" = "" ]; then tmux attach-session -t ssh_tmux || tmux new-session -s ssh_tmux; exit; elif ! [[ -z "$TMUX" ]]; then echo '"'"'Welcome to your vast.ai container! This session is running in `tmux`.'"'"'; echo '"'"'To disconnect without closing your processes, press ctrl+b, release, then d.'"'"'; echo '"'"'To disable auto-tmux, run `touch ~/.no_auto_tmux` and reconnect. See also https://tmuxcheatsheet.com/'"'"'; fi; ' >> ~/.bashrc
+
+# Use exec form of ENTRYPOINT for proper signal handling
+ENTRYPOINT ["bash", "-c", "exec /dockerstartup/entrypoint.sh"]
