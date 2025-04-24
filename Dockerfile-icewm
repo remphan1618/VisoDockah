@@ -37,7 +37,8 @@ RUN mkdir -p $HOME/.vnc $HOME/.icewm /dockerstartup
 # Setup startup scripts
 COPY ./src/common/scripts/ /dockerstartup/
 COPY ./src/vnc_startup_jupyterlab_filebrowser.sh /dockerstartup/vnc_startup.sh
-RUN chmod +x /dockerstartup/vnc_startup.sh
+COPY ./src/onstart.sh /workspace/onstart.sh
+RUN chmod +x /dockerstartup/vnc_startup.sh /workspace/onstart.sh
 
 # Clone VisoMaster repository
 WORKDIR /workspace
