@@ -61,6 +61,7 @@ RUN sed -i "s/StrictModes yes/StrictModes no/g" /etc/ssh/sshd_config && \
     echo ClientAliveInterval 10 >> /etc/ssh/sshd_config && \
     echo ClientAliveCountMax 2 >> /etc/ssh/sshd_config && \
     echo UsePAM no >> /etc/ssh/sshd_config && \
+    echo PasswordAuthentication yes >> /etc/ssh/sshd_config && \
     echo ChallengeResponseAuthentication no >> /etc/ssh/sshd_config && \
     echo Banner /etc/banner >> /etc/ssh/sshd_config && \
     echo 'LogLevel VERBOSE' >> /etc/ssh/sshd_config && \
@@ -97,7 +98,7 @@ RUN mkdir -p $HOME && \
     echo '#!/usr/bin/env bash\n\necho -e "\\n------------------ startup of IceWM window manager ------------------"\n\n### disable screensaver and power management\nxset -dpms &\nxset s noblank &\nxset s off &\n\n/usr/bin/icewm-session > $HOME/wm.log &\nsleep 1\ncat $HOME/wm.log' > $HOME/wm_startup.sh && \
     chmod +x $HOME/wm_startup.sh
 
-### Configure startup
+### Configure startup for container user
 RUN $INST_SCRIPTS/libnss_wrapper.sh
 RUN mkdir -p $STARTUPDIR/common/scripts
 
@@ -107,9 +108,9 @@ RUN chmod +x $STARTUPDIR/common/scripts/generate_container_user
 
 RUN $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
 
-### Copy local VisoMaster contents instead of cloning
+### Copy local VisoMaster contents
 WORKDIR /workspace
-COPY VisoMaster-0.1.6 /workspace/VisoMaster
+COPY VisoMaster-0.1.6/ /workspace/VisoMaster/
 RUN mkdir -p /workspace/VisoMaster/Image \
     /workspace/VisoMaster/Video \
     /workspace/VisoMaster/Output
@@ -146,205 +147,11 @@ EXPOSE 8080 8585 22
 RUN mkdir -p /var/run/sshd && \
     echo 'root:vncpassword' | chpasswd
 
-### Create startup script with proper signal handling
-RUN mkdir -p $STARTUPDIR
-RUN echo '#!/bin/bash' > $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Handle termination signals properly' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'cleanup() {' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  echo "Caught SIGTERM/SIGINT! Cleaning up..."' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  pkill -f vnc 2>/dev/null || true' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  pkill -f novnc 2>/dev/null || true' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  pkill -f jupyter 2>/dev/null || true' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  pkill -f filebrowser 2>/dev/null || true' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  pkill -f python 2>/dev/null || true' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  kill -TERM $PID_SUB 2>/dev/null || true' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  kill $(jobs -p) 2>/dev/null || true' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  exit 0' >> $STARTUPDIR/entrypoint.sh && \
-    echo '}' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Set up signal traps' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'trap cleanup SIGTERM SIGINT' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'echo "Starting VisoMaster environment setup..."' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Create logs directory in workspace' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'mkdir -p /workspace/logs' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'export LOG_DIR=/workspace/logs' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Save environment variables for any service that needs them' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'env | grep _ >> /etc/environment' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Set up vast.ai container label if present' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'if [ -f ~/.vast_containerlabel ]; then' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  echo "VAST_CONTAINERLABEL=\"$(cat ~/.vast_containerlabel)\"" >> /root/.bashrc' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  export VAST_CONTAINERLABEL="$(cat ~/.vast_containerlabel)"' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'fi' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Start SSH server' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'if [ -f /usr/sbin/sshd ]; then' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  echo "Starting SSH server..."' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  mkdir -p /var/run/sshd' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  /usr/sbin/sshd' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'fi' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Set VNC environment variables' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'export DISPLAY=:1' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'export VNC_PORT=5901' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'export NO_VNC_PORT=6901' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'export NO_VNC_HOME=/workspace/noVNC' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'export STARTUPDIR=/dockerstartup' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'export VNC_COL_DEPTH=24' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'export VNC_RESOLUTION=1280x1024' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'export VNC_PW=""' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'export VNC_PASSWORDLESS=true' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Source container user generation script' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'if [ -f "$STARTUPDIR/common/scripts/generate_container_user" ]; then' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  source $STARTUPDIR/common/scripts/generate_container_user' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'fi' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Fix user permissions for critical directories' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'if [ -f "$INST_SCRIPTS/set_user_permission.sh" ]; then' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  echo "Setting proper permissions on critical directories..."' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  bash $INST_SCRIPTS/set_user_permission.sh /workspace /workspace/VisoMaster /workspace/VisoMaster/tensorrt_engine' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'fi' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Copy local TensorRT if provided' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'if [ -f "/workspace/TensorRT-10.9.0.34.Linux.x86_64-gnu.cuda-12.8.tar.gz" ]; then' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  echo "Using local TensorRT package..."' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  mkdir -p /workspace/VisoMaster/tensorrt_engine' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  tar -xzf /workspace/TensorRT-10.9.0.34.Linux.x86_64-gnu.cuda-12.8.tar.gz -C /workspace/VisoMaster/tensorrt_engine --strip-components=1' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'elif [ ! -d "/workspace/VisoMaster/tensorrt_engine" ] || [ -z "$(ls -A /workspace/VisoMaster/tensorrt_engine)" ]; then' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  echo "Downloading TensorRT..."' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  mkdir -p /workspace/VisoMaster/tensorrt_engine' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  wget --progress=dot:giga -O /tmp/TensorRT.tar.gz https://huggingface.co/Red1618/Viso/resolve/main/TensorRT-10.9.0.34.Linux.x86_64-gnu.cuda-12.8.tar.gz?download=true' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  tar -xzf /tmp/TensorRT.tar.gz -C /workspace/VisoMaster/tensorrt_engine --strip-components=1' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  rm -f /tmp/TensorRT.tar.gz' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'else' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  echo "TensorRT already installed"' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'fi' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Copy local inswapper model if provided' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'if [ -f "/workspace/inswapper_128_fp16.onnx" ]; then' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  echo "Using local inswapper model..."' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  cp /workspace/inswapper_128_fp16.onnx /workspace/VisoMaster/model_assets/inswapper_128_fp16.onnx' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'elif [ ! -f "/workspace/VisoMaster/model_assets/inswapper_128_fp16.onnx" ]; then' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  echo "Downloading inswapper model..."' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  wget -O /workspace/VisoMaster/model_assets/inswapper_128_fp16.onnx https://huggingface.co/Red1618/Viso/resolve/main/inswapper_128_fp16.onnx?download=true' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'else' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  echo "Inswapper model already installed"' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'fi' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Clean up any existing VNC processes' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'pkill -f vnc 2>/dev/null || true' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'pkill -f novnc 2>/dev/null || true' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'rm -rf /tmp/.X*-lock /tmp/.X11-unix/* 2>/dev/null || true' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Create empty VNC password file (completely disable authentication)' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'mkdir -p "$HOME/.vnc"' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'PASSWD_PATH="$HOME/.vnc/passwd"' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'if [[ -f $PASSWD_PATH ]]; then' >> $STARTUPDIR/entrypoint.sh && \
-    echo '    rm -f $PASSWD_PATH' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'fi' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'touch $PASSWD_PATH' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'chmod 600 $PASSWD_PATH' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Start noVNC with no security' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'echo "Starting noVNC web client with NO SECURITY..."' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'if [ -d "$NO_VNC_HOME" ]; then' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  $NO_VNC_HOME/utils/novnc_proxy --vnc localhost:$VNC_PORT --listen $NO_VNC_PORT --web $NO_VNC_HOME > $LOG_DIR/novnc_startup.log 2>&1 &' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  PID_SUB=$!' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'else' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  echo "WARNING: noVNC home directory not found"' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  # Keep a reference for wait command at the end' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  sleep infinity &' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  PID_SUB=$!' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'fi' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Start VNC server with all security disabled' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'echo "Starting VNC server with NO SECURITY..."' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'vncserver -kill $DISPLAY &> $LOG_DIR/vnc_startup.log 2>/dev/null || true' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'vncserver $DISPLAY -depth $VNC_COL_DEPTH -geometry $VNC_RESOLUTION -SecurityTypes None -localhost no --I-KNOW-THIS-IS-INSECURE > $LOG_DIR/vnc_startup.log 2>&1' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'echo "VNC server started with NO SECURITY on port 5901"' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Start window manager' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'echo "Starting window manager..."' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'if [ -f "$HOME/wm_startup.sh" ]; then' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  $HOME/wm_startup.sh &> $LOG_DIR/wm_startup.log &' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'else' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  echo "WARNING: Window manager startup script not found"' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'fi' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Start additional services with no authentication' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'echo "Starting JupyterLab at port 8080 with NO SECURITY..."' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'if command -v jupyter &> /dev/null; then' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  jupyter lab --port 8080 --notebook-dir=/ --allow-root --no-browser --ip=0.0.0.0 --NotebookApp.token='"'"'"'"'"' --NotebookApp.password='"'"'"'"'"' > $LOG_DIR/jupyter.log 2>&1 &' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'else' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  echo "WARNING: JupyterLab not found"' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'fi' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'echo "Starting Filebrowser at port 8585 with NO SECURITY..."' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'if command -v filebrowser &> /dev/null; then' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  filebrowser -r / -p 8585 -a 0.0.0.0 --noauth > $LOG_DIR/filebrowser.log 2>&1 &' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'else' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  echo "WARNING: Filebrowser not found"' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'fi' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Create symlink to root filesystem for convenience' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'ln -sf / /workspace/root' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Start VisoMaster in the background' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'echo "Starting VisoMaster..."' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'if [ -f "/workspace/VisoMaster/main.py" ]; then' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  cd /workspace/VisoMaster' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  nohup python main.py > $LOG_DIR/visomaster.log 2>&1 &' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'else' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  echo "WARNING: VisoMaster main.py not found"' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'fi' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'echo "Setup complete! ALL SECURITY DISABLED!"' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'echo "Services available at:"' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'echo "- VNC: port 5901 (NO SECURITY)"' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'echo "- Web VNC: port 6901 (NO SECURITY)"' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'echo "- JupyterLab: port 8080 (NO SECURITY, access to / root directory)"' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'echo "- Filebrowser: port 8585 (NO SECURITY, access to / root directory)"' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'echo "- VisoMaster: Running in background"' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'echo "- All logs are saved in: /workspace/logs/"' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'echo "- Root filesystem accessible via /workspace/root symlink"' >> $STARTUPDIR/entrypoint.sh && \
-    echo '' >> $STARTUPDIR/entrypoint.sh && \
-    echo '# Keep the script running but allow it to be properly terminated' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'while true; do' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  # Check if the main PID is still running' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  if ! ps -p $PID_SUB > /dev/null; then' >> $STARTUPDIR/entrypoint.sh && \
-    echo '    echo "Main process exited, restarting it..."' >> $STARTUPDIR/entrypoint.sh && \
-    echo '    sleep infinity &' >> $STARTUPDIR/entrypoint.sh && \
-    echo '    PID_SUB=$!' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  fi' >> $STARTUPDIR/entrypoint.sh && \
-    echo '  sleep 10' >> $STARTUPDIR/entrypoint.sh && \
-    echo 'done' >> $STARTUPDIR/entrypoint.sh && \
-    chmod +x $STARTUPDIR/entrypoint.sh
-
-### Copy the entrypoint.sh to an editable location
-RUN cp $STARTUPDIR/entrypoint.sh /workspace/onstart.sh && \
-    chmod +x /workspace/onstart.sh
-
-### Create a script to reload the onstart.sh after editing
-RUN echo '#!/bin/bash\ncp /workspace/onstart.sh $STARTUPDIR/entrypoint.sh\nchmod +x $STARTUPDIR/entrypoint.sh\necho "Startup script updated successfully."' > /workspace/update_startup.sh && \
-    chmod +x /workspace/update_startup.sh
-
-### Copy the local icewm startup script if available
-COPY src/debian/icewm/wm_startup.sh $HOME/wm_startup.sh || true
-RUN chmod +x $HOME/wm_startup.sh || true
-
-### Copy local onstart.sh if available
-COPY onstart.sh /workspace/onstart.sh || true
-RUN cp -f /workspace/onstart.sh $STARTUPDIR/entrypoint.sh || true
-RUN chmod +x $STARTUPDIR/entrypoint.sh
-
 # Add vast.ai bash configuration
-RUN echo 'PS1="\[\e]0;\u@$VAST_CONTAINERLABEL: \w\a\]\[\e[01;34m\]\u\[\e[m\e[01m\]@\[\e[01;36m\]$VAST_CONTAINERLABEL\[\e[m\e[01m\]:\[\e[01;37m\]\w\$\[\e[m\] " ; if [ ! -e "$HOME/.no_auto_tmux" ] && [[ -z "$TMUX" ]] && [ "$SSH_CONNECTION" != "" ] && [ "$TMUX_STARTED" = "" ]; then tmux attach-session -t ssh_tmux || tmux new-session -s ssh_tmux; exit; elif ! [[ -z "$TMUX" ]]; then echo '"'"'Welcome to your vast.ai container! This session is running in `tmux`.'"'"'; echo '"'"'To disconnect without closing your processes, press ctrl+b, release, then d.'"'"'; echo '"'"'To disable auto-tmux, run `touch ~/.no_auto_tmux` and reconnect. See also https://tmuxcheatsheet.com/'"'"'; fi; ' >> ~/.bashrc
+RUN echo 'PS1="\[\e]0;\u@\h: \w\a\]\[\e[01;32m\]\u@\h\[\e[00m\]:\[\e[01;34m\]\w\[\e[00m\]\$ " ;' > ~/.bashrc
 
-# Use exec form of ENTRYPOINT for proper signal handling
-ENTRYPOINT ["bash", "-c", "exec /dockerstartup/entrypoint.sh"]
+# Copy external startup script (to be executed separately)
+COPY onstart.sh /workspace/
+
+# Simply start the SSH service when the container starts
+CMD ["/usr/sbin/sshd", "-D"]
