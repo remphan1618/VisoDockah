@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
+FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
 
 ENV REFRESHED_AT 2024-08-12
 
@@ -47,44 +47,29 @@ RUN apt-get update && apt-get install -y \
     vim \
     net-tools \
     tmux \
-    locales \
-    sudo \
-    rsync \
-    tzdata && \
+    tzdata \
+    python3 \
+    python3-pip \
+    fonts-wqy-zenhei \
+    libnss-wrapper \
+    gettext && \
     ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
     dpkg-reconfigure -f noninteractive tzdata && \
-    mkdir -p /tmp && chmod 1777 /tmp && \
     rm -rf /var/lib/apt/lists/*
 
-### Configure SSH server (vast.ai compatibility)
-RUN sed -i "s/StrictModes yes/StrictModes no/g" /etc/ssh/sshd_config && \
-    echo ClientAliveInterval 10 >> /etc/ssh/sshd_config && \
-    echo ClientAliveCountMax 2 >> /etc/ssh/sshd_config && \
-    echo UsePAM no >> /etc/ssh/sshd_config && \
-    echo PasswordAuthentication yes >> /etc/ssh/sshd_config && \
-    echo ChallengeResponseAuthentication no >> /etc/ssh/sshd_config && \
-    echo Banner /etc/banner >> /etc/ssh/sshd_config && \
-    echo 'LogLevel VERBOSE' >> /etc/ssh/sshd_config && \
-    echo 'Welcome to vast.ai and VisoMaster. If authentication fails, try again after a few seconds, and double check your ssh key.' > /etc/banner && \
-    echo 'Have fun!' >> /etc/banner
+### Create required directories
+RUN mkdir -p $INST_SCRIPTS/ $STARTUPDIR/common/scripts $HOME
 
-### Create installation script directory
-RUN mkdir -p $INST_SCRIPTS/
-
-### Copy installation scripts from the LOCAL src directory
-COPY src/common/install/*.sh $INST_SCRIPTS/
-COPY src/debian/install/*.sh $INST_SCRIPTS/
-RUN ls -la $INST_SCRIPTS/
+### Create necessary script files directly
+RUN echo '#!/bin/bash\nset -e\necho "Installing tools"\napt-get update && apt-get install -y vim wget net-tools locales bzip2 procps\necho "en_US.UTF-8 UTF-8" > /etc/locale.gen && locale-gen' > $INST_SCRIPTS/tools.sh && \
+    echo '#!/bin/bash\nset -e\necho "Installing TigerVNC"\napt-get update && apt-get install -y tigervnc-standalone-server\nprintf "\n# docker-headless-vnc-container:\n$localhost = \"no\";\n1;\n" >>/etc/tigervnc/vncserver-config-defaults' > $INST_SCRIPTS/tigervnc.sh && \
+    echo '#!/bin/bash\nset -e\necho "Installing noVNC"\nmkdir -p $NO_VNC_HOME/utils/websockify\nwget -qO- https://github.com/novnc/noVNC/archive/refs/tags/v1.5.0.tar.gz | tar xz --strip 1 -C $NO_VNC_HOME\nwget -qO- https://github.com/novnc/websockify/archive/refs/tags/v0.10.0.tar.gz | tar xz --strip 1 -C $NO_VNC_HOME/utils/websockify\nln -s $NO_VNC_HOME/vnc_lite.html $NO_VNC_HOME/index.html' > $INST_SCRIPTS/no_vnc_1.5.0.sh && \
+    echo '#!/bin/bash\nset -e\necho "Installing Firefox"\napt-get update && apt-get install -y firefox-esr' > $INST_SCRIPTS/firefox.sh && \
+    echo '#!/bin/bash\nset -e\nfor var in "$@"; do\necho "fix permissions for: $var"\nfind "$var"/ -name "*.sh" -exec chmod a+x {} + 2>/dev/null || true\nchgrp -R 0 "$var" 2>/dev/null || true\nchmod -R a+rw "$var" 2>/dev/null || true\nfind "$var" -type d -exec chmod a+x {} + 2>/dev/null || true\ndone' > $INST_SCRIPTS/set_user_permission.sh && \
+    echo '# Set current user in nss_wrapper\nUSER_ID=$(id -u)\nGROUP_ID=$(id -g)\necho "USER_ID: $USER_ID, GROUP_ID: $GROUP_ID"\n\nif [ x"$USER_ID" != x"0" ]; then\n    NSS_WRAPPER_PASSWD=/tmp/passwd\n    NSS_WRAPPER_GROUP=/etc/group\n    cat /etc/passwd > $NSS_WRAPPER_PASSWD\n    echo "default:x:${USER_ID}:${GROUP_ID}:Default Application User:${HOME}:/bin/bash" >> $NSS_WRAPPER_PASSWD\n    export NSS_WRAPPER_PASSWD\n    export NSS_WRAPPER_GROUP\n    if [ -r /usr/lib/libnss_wrapper.so ]; then\n        LD_PRELOAD=/usr/lib/libnss_wrapper.so\n    elif [ -r /usr/lib64/libnss_wrapper.so ]; then\n        LD_PRELOAD=/usr/lib64/libnss_wrapper.so\n    elif [ -r /usr/lib/x86_64-linux-gnu/libnss_wrapper.so ]; then\n        LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libnss_wrapper.so\n    elif [ -r /usr/lib/aarch64-linux-gnu/libnss_wrapper.so ]; then\n        LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libnss_wrapper.so\n    else\n        echo "no libnss_wrapper.so installed!"\n        exit 1\n    fi\n    echo "nss_wrapper location: $LD_PRELOAD"\n    export LD_PRELOAD\nfi' > $STARTUPDIR/common/scripts/generate_container_user
 
 ### Make scripts executable
-RUN chmod +x $INST_SCRIPTS/*.sh
-
-### Install common tools
-RUN $INST_SCRIPTS/tools.sh
-ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en' LC_ALL='en_US.UTF-8'
-
-### Install custom fonts
-RUN $INST_SCRIPTS/install_custom_fonts.sh
+RUN chmod +x $INST_SCRIPTS/*.sh $STARTUPDIR/common/scripts/*
 
 ### Install xvnc-server & noVNC - HTML5 based VNC viewer
 RUN $INST_SCRIPTS/tigervnc.sh
@@ -94,34 +79,24 @@ RUN $INST_SCRIPTS/no_vnc_1.5.0.sh
 RUN $INST_SCRIPTS/firefox.sh
 
 ### Configure IceWM UI
-RUN mkdir -p $HOME && \
-    echo '#!/usr/bin/env bash\n\necho -e "\\n------------------ startup of IceWM window manager ------------------"\n\n### disable screensaver and power management\nxset -dpms &\nxset s noblank &\nxset s off &\n\n/usr/bin/icewm-session > $HOME/wm.log &\nsleep 1\ncat $HOME/wm.log' > $HOME/wm_startup.sh && \
+RUN echo '#!/bin/bash\n\necho -e "\n------------------ startup of IceWM window manager ------------------"\n\n### disable screensaver and power management\nxset -dpms &\nxset s noblank &\nxset s off &\n\n/usr/bin/icewm-session > $HOME/wm.log &\nsleep 1\ncat $HOME/wm.log' > $HOME/wm_startup.sh && \
     chmod +x $HOME/wm_startup.sh
 
-### Configure startup for container user
-RUN $INST_SCRIPTS/libnss_wrapper.sh
-RUN mkdir -p $STARTUPDIR/common/scripts
-
-### Copy generate_container_user script from the LOCAL src
-COPY src/common/scripts/generate_container_user $STARTUPDIR/common/scripts/
-RUN chmod +x $STARTUPDIR/common/scripts/generate_container_user
-
+### Set permissions
 RUN $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
 
-### Copy local VisoMaster contents
+### Clone VisoMaster repository
 WORKDIR /workspace
-COPY VisoMaster-0.1.6/ /workspace/VisoMaster/
-RUN mkdir -p /workspace/VisoMaster/Image \
+RUN git clone -b v0.1.6 https://github.com/visomaster/VisoMaster.git && \
+    mkdir -p /workspace/VisoMaster/Image \
     /workspace/VisoMaster/Video \
-    /workspace/VisoMaster/Output
-
-### Install Python with pip
-RUN apt-get update && apt-get install -y python3 python3-pip && \
-    rm -rf /var/lib/apt/lists/*
+    /workspace/VisoMaster/Output \
+    /workspace/VisoMaster/model_assets \
+    /workspace/VisoMaster/tensorrt_engine
 
 ### Install Python dependencies
 WORKDIR /workspace/VisoMaster
-RUN pip install --no-cache-dir torch==2.4.1+cu124 --index-url https://download.pytorch.org/whl/cu124 && \
+RUN pip install --no-cache-dir torch==2.4.1+cu118 --index-url https://download.pytorch.org/whl/cu118 && \
     pip install --no-cache-dir -r requirements_cu124.txt && \
     pip uninstall -y onnxruntime-gpu && \
     pip install --no-cache-dir onnxruntime-gpu==1.19.0 && \
@@ -145,13 +120,20 @@ EXPOSE 8080 8585 22
 
 ### Setup SSH server
 RUN mkdir -p /var/run/sshd && \
-    echo 'root:vncpassword' | chpasswd
+    echo 'root:vncpassword' | chpasswd && \
+    sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PermitRootLogin yes/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
+    sed -i 's/^#\?X11Forwarding no/X11Forwarding yes/' /etc/ssh/sshd_config
 
-# Add vast.ai bash configuration
-RUN echo 'PS1="\[\e]0;\u@\h: \w\a\]\[\e[01;32m\]\u@\h\[\e[00m\]:\[\e[01;34m\]\w\[\e[00m\]\$ " ;' > ~/.bashrc
+### Use existing startup script
+COPY ./src/vnc_startup_jupyterlab_filebrowser.sh $STARTUPDIR/entrypoint.sh
+RUN chmod +x $STARTUPDIR/entrypoint.sh && \
+    cp $STARTUPDIR/entrypoint.sh /workspace/onstart.sh && \
+    chmod +x /workspace/onstart.sh
 
-# Copy external startup script (to be executed separately)
-COPY onstart.sh /workspace/
+### Create a script to reload the onstart.sh after editing
+RUN echo '#!/bin/bash\ncp /workspace/onstart.sh $STARTUPDIR/entrypoint.sh\nchmod +x $STARTUPDIR/entrypoint.sh\necho "Startup script updated successfully."' > /workspace/update_startup.sh && \
+    chmod +x /workspace/update_startup.sh
 
-# Simply start the SSH service when the container starts
-CMD ["/usr/sbin/sshd", "-D"]
+ENTRYPOINT ["/dockerstartup/entrypoint.sh"]
