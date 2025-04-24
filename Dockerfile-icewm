@@ -34,11 +34,13 @@ COPY ./src/debian/icewm/ $HOME/
 RUN chmod +x $HOME/wm_startup.sh
 RUN mkdir -p $HOME/.vnc $HOME/.icewm /dockerstartup
 
-# Setup startup scripts
+# Setup minimal startup script
 COPY ./src/common/scripts/ /dockerstartup/
-COPY ./src/vnc_startup_jupyterlab_filebrowser.sh /dockerstartup/vnc_startup.sh
-COPY ./src/onstart.sh /workspace/onstart.sh
-RUN chmod +x /dockerstartup/vnc_startup.sh /workspace/onstart.sh
+# Create a simple entrypoint script that can be overridden by vast.ai
+RUN echo '#!/bin/bash' > /dockerstartup/entrypoint.sh && \
+    echo 'echo "Container started. Use vast.ai onstart script for full initialization."' >> /dockerstartup/entrypoint.sh && \
+    echo 'tail -f /dev/null' >> /dockerstartup/entrypoint.sh && \
+    chmod +x /dockerstartup/entrypoint.sh
 
 # Clone VisoMaster repository
 WORKDIR /workspace
@@ -81,5 +83,5 @@ RUN apt-get clean && \
 # Expose ports
 EXPOSE $VNC_PORT $NO_VNC_PORT 8080 8585
 
-# Use vnc_startup.sh as entrypoint
-ENTRYPOINT ["/dockerstartup/vnc_startup.sh"]
+# Use simple entrypoint script instead of vnc_startup.sh
+ENTRYPOINT ["/dockerstartup/entrypoint.sh"]
