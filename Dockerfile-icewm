@@ -52,18 +52,51 @@ RUN apt-get update && apt-get install -y \
     dpkg-reconfigure -f noninteractive tzdata && \
     rm -rf /var/lib/apt/lists/*
 
-### Clone the repository to get all the scripts
+### Clone the CORRECT repository to get all the scripts
 WORKDIR /tmp
-RUN git clone https://github.com/visomaster/VisoMaster.git
+RUN git clone https://github.com/remphan1618/VisoDockah.git
 RUN mkdir -p $INST_SCRIPTS/
-WORKDIR /tmp/VisoMaster
+WORKDIR /tmp/VisoDockah
 
-### Add all install scripts for further steps
-RUN if [ -d "./src/common/install" ]; then cp -r ./src/common/install/* $INST_SCRIPTS/; fi
-RUN if [ -d "./src/debian/install" ]; then cp -r ./src/debian/install/* $INST_SCRIPTS/; fi
+### Debug: List the repository structure to verify
+RUN ls -la && ls -la src/ || echo "No src directory found"
+
+### Copy installation scripts 
+RUN mkdir -p $INST_SCRIPTS/
+COPY ./src/common/install/*.sh $INST_SCRIPTS/ || echo "Failed to copy from local context, trying from cloned repo"
+COPY ./src/debian/install/*.sh $INST_SCRIPTS/ || echo "Failed to copy from local context, trying from cloned repo"
+
+### Try copying from the cloned repo if local files aren't available
+RUN if [ -d "./src/common/install" ]; then cp -r ./src/common/install/*.sh $INST_SCRIPTS/ || true; fi
+RUN if [ -d "./src/debian/install" ]; then cp -r ./src/debian/install/*.sh $INST_SCRIPTS/ || true; fi
+
+### Create minimal versions of required scripts if they don't exist
+RUN if [ ! -f "$INST_SCRIPTS/tools.sh" ]; then \
+        echo '#!/usr/bin/env bash\nset -e\necho "Installing minimal tools"\napt-get update && apt-get install -y vim wget net-tools locales bzip2 procps\necho "en_US.UTF-8 UTF-8" > /etc/locale.gen && locale-gen' > $INST_SCRIPTS/tools.sh; \
+    fi && \
+    if [ ! -f "$INST_SCRIPTS/tigervnc.sh" ]; then \
+        echo '#!/usr/bin/env bash\nset -e\necho "Installing TigerVNC"\napt-get update && apt-get install -y tigervnc-standalone-server\nprintf '"'"'\n# docker-headless-vnc-container:\n$localhost = "no";\n1;\n'"'"' >>/etc/tigervnc/vncserver-config-defaults' > $INST_SCRIPTS/tigervnc.sh; \
+    fi && \
+    if [ ! -f "$INST_SCRIPTS/install_custom_fonts.sh" ]; then \
+        echo '#!/usr/bin/env bash\nset -e\necho "Installing fonts"\napt-get update && apt-get install -y fonts-wqy-zenhei' > $INST_SCRIPTS/install_custom_fonts.sh; \
+    fi && \
+    if [ ! -f "$INST_SCRIPTS/libnss_wrapper.sh" ]; then \
+        echo '#!/usr/bin/env bash\nset -e\necho "Installing nss wrapper"\napt-get update && apt-get install -y libnss-wrapper gettext' > $INST_SCRIPTS/libnss_wrapper.sh; \
+    fi && \
+    if [ ! -f "$INST_SCRIPTS/no_vnc_1.5.0.sh" ]; then \
+        echo '#!/usr/bin/env bash\nset -e\necho "Installing noVNC"\nmkdir -p $NO_VNC_HOME/utils/websockify\nwget -qO- https://github.com/novnc/noVNC/archive/refs/tags/v1.5.0.tar.gz | tar xz --strip 1 -C $NO_VNC_HOME\nwget -qO- https://github.com/novnc/websockify/archive/refs/tags/v0.10.0.tar.gz | tar xz --strip 1 -C $NO_VNC_HOME/utils/websockify\nln -s $NO_VNC_HOME/vnc_lite.html $NO_VNC_HOME/index.html' > $INST_SCRIPTS/no_vnc_1.5.0.sh; \
+    fi && \
+    if [ ! -f "$INST_SCRIPTS/firefox.sh" ]; then \
+        echo '#!/usr/bin/env bash\nset -e\necho "Installing Firefox"\napt-get update && apt-get install -y firefox-esr' > $INST_SCRIPTS/firefox.sh; \
+    fi && \
+    if [ ! -f "$INST_SCRIPTS/set_user_permission.sh" ]; then \
+        echo '#!/usr/bin/env bash\nset -e\nfor var in "$@"; do\necho "fix permissions for: $var"\nfind "$var"/ -name "*.sh" -exec chmod a+x {} + 2>/dev/null || true\nchgrp -R 0 "$var" 2>/dev/null || true\nchmod -R a+rw "$var" 2>/dev/null || true\nfind "$var" -type d -exec chmod a+x {} + 2>/dev/null || true\ndone' > $INST_SCRIPTS/set_user_permission.sh; \
+    fi
+
+### Make scripts executable
 RUN chmod +x $INST_SCRIPTS/*.sh
 
-### Install some common tools
+### Install common tools
 RUN $INST_SCRIPTS/tools.sh
 ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en' LC_ALL='en_US.UTF-8'
 
@@ -78,20 +111,22 @@ RUN $INST_SCRIPTS/no_vnc_1.5.0.sh
 RUN $INST_SCRIPTS/firefox.sh
 
 ### Configure IceWM UI
-RUN if [ -d "/tmp/VisoMaster/src/debian/icewm" ]; then \
-    cp -r /tmp/VisoMaster/src/debian/icewm/* $HOME/; \
-else \
-    mkdir -p $HOME; \
-    echo '#!/usr/bin/env bash\n/usr/bin/icewm-session > $HOME/wm.log &' > $HOME/wm_startup.sh; \
-fi
-RUN chmod +x $HOME/wm_startup.sh
+RUN mkdir -p $HOME && \
+    echo '#!/usr/bin/env bash\n\necho -e "\\n------------------ startup of IceWM window manager ------------------"\n\n### disable screensaver and power management\nxset -dpms &\nxset s noblank &\nxset s off &\n\n/usr/bin/icewm-session > $HOME/wm.log &\nsleep 1\ncat $HOME/wm.log' > $HOME/wm_startup.sh && \
+    chmod +x $HOME/wm_startup.sh
 
 ### Configure startup
 RUN $INST_SCRIPTS/libnss_wrapper.sh
 RUN mkdir -p $STARTUPDIR/common/scripts
-RUN if [ -d "/tmp/VisoMaster/src/common/scripts" ]; then \
-    cp -r /tmp/VisoMaster/src/common/scripts/* $STARTUPDIR/common/scripts/; \
+
+# Copy generate_container_user from local context or create it
+COPY ./src/common/scripts/generate_container_user $STARTUPDIR/common/scripts/ || echo "Failed to copy from local context"
+
+# Create container user script if it doesn't exist
+RUN if [ ! -f "$STARTUPDIR/common/scripts/generate_container_user" ]; then \
+    echo '# Set current user in nss_wrapper\nUSER_ID=$(id -u)\nGROUP_ID=$(id -g)\necho "USER_ID: $USER_ID, GROUP_ID: $GROUP_ID"\n\nif [ x"$USER_ID" != x"0" ]; then\n    NSS_WRAPPER_PASSWD=/tmp/passwd\n    NSS_WRAPPER_GROUP=/etc/group\n    cat /etc/passwd > $NSS_WRAPPER_PASSWD\n    echo "default:x:${USER_ID}:${GROUP_ID}:Default Application User:${HOME}:/bin/bash" >> $NSS_WRAPPER_PASSWD\n    export NSS_WRAPPER_PASSWD\n    export NSS_WRAPPER_GROUP\n    if [ -r /usr/lib/libnss_wrapper.so ]; then\n        LD_PRELOAD=/usr/lib/libnss_wrapper.so\n    elif [ -r /usr/lib64/libnss_wrapper.so ]; then\n        LD_PRELOAD=/usr/lib64/libnss_wrapper.so\n    elif [ -r /usr/lib/x86_64-linux-gnu/libnss_wrapper.so ]; then\n        LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libnss_wrapper.so\n    elif [ -r /usr/lib/aarch64-linux-gnu/libnss_wrapper.so ]; then\n        LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libnss_wrapper.so\n    else\n        echo "no libnss_wrapper.so installed!"\n        exit 1\n    fi\n    echo "nss_wrapper location: $LD_PRELOAD"\n    export LD_PRELOAD\nfi' > $STARTUPDIR/common/scripts/generate_container_user; \
 fi
+
 RUN chmod +x $STARTUPDIR/common/scripts/*
 RUN $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
 
@@ -140,17 +175,170 @@ RUN mkdir -p /var/run/sshd && \
     sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
     sed -i 's/^#\?X11Forwarding no/X11Forwarding yes/' /etc/ssh/sshd_config
 
-### Copy the onstart.sh to both an executable location and an editable location
-COPY ./onstart.sh $STARTUPDIR/entrypoint.sh
-COPY ./onstart.sh /workspace/onstart.sh
-RUN chmod +x $STARTUPDIR/entrypoint.sh
-RUN chmod +x /workspace/onstart.sh
+### Create startup script
+RUN echo '#!/bin/bash
+echo "Starting VisoMaster environment setup..."
+
+# Create logs directory in workspace
+mkdir -p /workspace/logs
+export LOG_DIR=/workspace/logs
+
+# Save environment variables for any service that needs them
+env | grep _ >> /etc/environment
+
+# Set VNC environment variables
+export DISPLAY=:1
+export VNC_PORT=5901
+export NO_VNC_PORT=6901
+export NO_VNC_HOME=/workspace/noVNC
+export STARTUPDIR=/dockerstartup
+export VNC_COL_DEPTH=24
+export VNC_RESOLUTION=1280x1024
+export VNC_PW=""
+export VNC_PASSWORDLESS=true
+
+# Source container user generation script
+if [ -f "$STARTUPDIR/common/scripts/generate_container_user" ]; then
+  source $STARTUPDIR/common/scripts/generate_container_user
+fi
+
+# Start SSH server if installed
+if [ -f /usr/sbin/sshd ]; then
+  echo "Starting SSH server..."
+  mkdir -p /var/run/sshd
+  # Start SSH with root login permitted and empty passwords allowed
+  sed -i '"'"'s/#PermitRootLogin prohibit-password/PermitRootLogin yes/'"'"' /etc/ssh/sshd_config
+  sed -i '"'"'s/#PermitEmptyPasswords no/PermitEmptyPasswords yes/'"'"' /etc/ssh/sshd_config
+  /usr/sbin/sshd || echo "WARNING: Failed to start SSH server"
+fi
+
+# Fix user permissions for critical directories
+if [ -f "$INST_SCRIPTS/set_user_permission.sh" ]; then
+  echo "Setting proper permissions on critical directories..."
+  bash $INST_SCRIPTS/set_user_permission.sh /workspace /workspace/VisoMaster /workspace/VisoMaster/tensorrt_engine
+fi
+
+# Download TensorRT if not already present
+if [ ! -d "/workspace/VisoMaster/tensorrt_engine" ] || [ -z "$(ls -A /workspace/VisoMaster/tensorrt_engine)" ]; then
+  echo "Downloading TensorRT..."
+  mkdir -p /workspace/VisoMaster/tensorrt_engine
+  
+  if [ -f "/workspace/TensorRT-10.9.0.34.Linux.x86_64-gnu.cuda-12.8.tar.gz" ]; then
+    # Use local file if it exists
+    echo "Using local TensorRT package..."
+    tar -xzf /workspace/TensorRT-10.9.0.34.Linux.x86_64-gnu.cuda-12.8.tar.gz -C /workspace/VisoMaster/tensorrt_engine --strip-components=1
+  else  
+    # Download from HuggingFace
+    wget --progress=dot:giga -O /tmp/TensorRT.tar.gz https://huggingface.co/Red1618/Viso/resolve/main/TensorRT-10.9.0.34.Linux.x86_64-gnu.cuda-12.8.tar.gz?download=true
+    tar -xzf /tmp/TensorRT.tar.gz -C /workspace/VisoMaster/tensorrt_engine --strip-components=1
+    rm -f /tmp/TensorRT.tar.gz
+  fi
+fi
+
+# Download inswapper model if needed
+if [ ! -f "/workspace/VisoMaster/model_assets/inswapper_128_fp16.onnx" ]; then
+  echo "Downloading inswapper model..."
+  if [ -f "/workspace/inswapper_128_fp16.onnx" ]; then
+    # Use local file if it exists
+    echo "Using local inswapper model..."
+    cp /workspace/inswapper_128_fp16.onnx /workspace/VisoMaster/model_assets/inswapper_128_fp16.onnx
+  else
+    # Download from HuggingFace
+    wget -O /workspace/VisoMaster/model_assets/inswapper_128_fp16.onnx https://huggingface.co/Red1618/Viso/resolve/main/inswapper_128_fp16.onnx?download=true
+  fi
+fi
+
+# Clean up any existing VNC processes
+pkill -f vnc 2>/dev/null || true
+pkill -f novnc 2>/dev/null || true
+rm -rf /tmp/.X*-lock /tmp/.X11-unix/* 2>/dev/null || true
+
+# Create empty VNC password file (completely disable authentication)
+mkdir -p "$HOME/.vnc"
+PASSWD_PATH="$HOME/.vnc/passwd"
+if [[ -f $PASSWD_PATH ]]; then
+    rm -f $PASSWD_PATH
+fi
+touch $PASSWD_PATH
+chmod 600 $PASSWD_PATH
+
+# Start noVNC with no security
+echo "Starting noVNC web client with NO SECURITY..."
+if [ -d "$NO_VNC_HOME" ]; then
+  $NO_VNC_HOME/utils/novnc_proxy --vnc localhost:$VNC_PORT --listen $NO_VNC_PORT --web $NO_VNC_HOME > $LOG_DIR/novnc_startup.log 2>&1 &
+  PID_SUB=$!
+else
+  echo "WARNING: noVNC home directory not found"
+  # Keep a reference for wait command at the end
+  sleep infinity &
+  PID_SUB=$!
+fi
+
+# Start VNC server with all security disabled
+echo "Starting VNC server with NO SECURITY..."
+vncserver -kill $DISPLAY &> $LOG_DIR/vnc_startup.log 2>/dev/null || true
+vncserver $DISPLAY -depth $VNC_COL_DEPTH -geometry $VNC_RESOLUTION -SecurityTypes None -localhost no --I-KNOW-THIS-IS-INSECURE > $LOG_DIR/vnc_startup.log 2>&1
+
+echo "VNC server started with NO SECURITY on port 5901"
+
+# Start window manager
+echo "Starting window manager..."
+if [ -f "$HOME/wm_startup.sh" ]; then
+  $HOME/wm_startup.sh &> $LOG_DIR/wm_startup.log &
+else
+  echo "WARNING: Window manager startup script not found"
+fi
+
+# Start additional services with no authentication
+echo "Starting JupyterLab at port 8080 with NO SECURITY..."
+if command -v jupyter &> /dev/null; then
+  jupyter lab --port 8080 --notebook-dir=/ --allow-root --no-browser --ip=0.0.0.0 --NotebookApp.token='"'"'"'"'"' --NotebookApp.password='"'"'"'"'"' > $LOG_DIR/jupyter.log 2>&1 &
+else
+  echo "WARNING: JupyterLab not found"
+fi
+
+echo "Starting Filebrowser at port 8585 with NO SECURITY..."
+if command -v filebrowser &> /dev/null; then
+  filebrowser -r / -p 8585 -a 0.0.0.0 --noauth > $LOG_DIR/filebrowser.log 2>&1 &
+else
+  echo "WARNING: Filebrowser not found"
+fi
+
+# Create symlink to root filesystem for convenience
+ln -sf / /workspace/root
+
+# Start VisoMaster in the background
+echo "Starting VisoMaster..."
+if [ -f "/workspace/VisoMaster/main.py" ]; then
+  cd /workspace/VisoMaster
+  nohup python main.py > $LOG_DIR/visomaster.log 2>&1 &
+else
+  echo "WARNING: VisoMaster main.py not found"
+fi
+
+echo "Setup complete! ALL SECURITY DISABLED!"
+echo "Services available at:"
+echo "- VNC: port 5901 (NO SECURITY)"
+echo "- Web VNC: port 6901 (NO SECURITY)"
+echo "- JupyterLab: port 8080 (NO SECURITY, access to / root directory)"
+echo "- Filebrowser: port 8585 (NO SECURITY, access to / root directory)"
+echo "- VisoMaster: Running in background"
+echo "- All logs are saved in: /workspace/logs/"
+echo "- Root filesystem accessible via /workspace/root symlink"
+
+# Keep the script running
+wait $PID_SUB' > $STARTUPDIR/entrypoint.sh
+
+### Copy the entrypoint.sh to an editable location
+RUN cp $STARTUPDIR/entrypoint.sh /workspace/onstart.sh && \
+    chmod +x $STARTUPDIR/entrypoint.sh && \
+    chmod +x /workspace/onstart.sh
 
 ### Create a script to reload the onstart.sh after editing
-RUN echo '#!/bin/bash\ncp /workspace/onstart.sh $STARTUPDIR/entrypoint.sh\nchmod +x $STARTUPDIR/entrypoint.sh\necho "Startup script updated successfully."' > /workspace/update_startup.sh
-RUN chmod +x /workspace/update_startup.sh
+RUN echo '#!/bin/bash\ncp /workspace/onstart.sh $STARTUPDIR/entrypoint.sh\nchmod +x $STARTUPDIR/entrypoint.sh\necho "Startup script updated successfully."' > /workspace/update_startup.sh && \
+    chmod +x /workspace/update_startup.sh
 
 ### Clean up temporary files
-RUN rm -rf /tmp/VisoMaster
+RUN rm -rf /tmp/VisoDockah
 
 ENTRYPOINT ["/dockerstartup/entrypoint.sh"]
