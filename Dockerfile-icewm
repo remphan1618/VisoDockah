@@ -122,7 +122,7 @@ RUN conda install -c conda-forge cudnn -y
 ### Install visomaster
 WORKDIR /workspace
 # MODIFIED: Clone repo first, then checkout the specific tag v0.1.6
-RUN git clone https://github.com/visomaster/VisoMaster.git && \
+RUN git clone https://github.com/remphan1618/VisoMaster.git && \
     cd VisoMaster && \
     git checkout v0.1.6 && \
     cd ..
