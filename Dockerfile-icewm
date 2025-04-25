@@ -80,7 +80,6 @@ RUN chmod +x $INST_SCRIPTS/no_vnc_1.5.0.sh && $INST_SCRIPTS/no_vnc_1.5.0.sh
 RUN chmod +x $INST_SCRIPTS/firefox.sh && $INST_SCRIPTS/firefox.sh
 
 ### Install IceWM UI
-# *** CORRECTED ***
 # Add wm_startup.sh from its source location to INST_SCRIPTS and run it
 ADD ./src/debian/icewm/wm_startup.sh $INST_SCRIPTS/wm_startup.sh
 RUN chmod +x $INST_SCRIPTS/wm_startup.sh && $INST_SCRIPTS/wm_startup.sh
@@ -98,6 +97,9 @@ RUN chmod +x $INST_SCRIPTS/set_user_permission.sh && $INST_SCRIPTS/set_user_perm
 WORKDIR /workspace
 RUN git clone --branch v0.1.6 https://github.com/visomaster/VisoMaster.git
 WORKDIR /workspace/visomaster
+
+# --- Debugging Step: List contents after cloning ---
+RUN ls -al
 
 # Removed incorrect pip install -r ./requirements.txt
 RUN pip install scikit-image
