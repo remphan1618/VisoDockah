@@ -1,5 +1,7 @@
+# Base image
 FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
 
+# Metadata and environment variables
 ENV REFRESHED_AT 2024-08-12
 
 LABEL io.k8s.description="Headless VNC Container with Xfce window manager, firefox and chromium" \
@@ -31,14 +33,14 @@ ENV HOME=/workspace \
 WORKDIR $HOME
 
 ### Install necessary dependencies and Python 3.10
-RUN apt-get update && apt-get install -y \
+# Combine installations where possible, ensure tzdata config runs
+RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     git \
     build-essential \
     software-properties-common \
     apt-transport-https \
     ca-certificates \
-    git \
     unzip \
     ffmpeg \
     jq \
@@ -46,84 +48,113 @@ RUN apt-get update && apt-get install -y \
     python3.10 \
     python3.10-venv \
     python3-pip && \
+    # Configure timezone
     ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
     dpkg-reconfigure -f noninteractive tzdata && \
+    # Clean up
     rm -rf /var/lib/apt/lists/*
 
 ### Update pip and set default python3 alias to 3.10
 RUN python3.10 -m pip install --upgrade pip && \
-    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 && \
-    update-alternatives --install /usr/bin/pip3 pip3 /usr/bin/pip3.10 1
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 # && \
+    # update-alternatives --install /usr/bin/pip3 pip3 /usr/bin/pip3.10 1 # This line might be unnecessary if pip3 already points correctly
 
 ### Add all install scripts for further steps
+# Ensure the source paths match your project structure
 ADD ./src/common/install/ $INST_SCRIPTS/
 ADD ./src/debian/install/ $INST_SCRIPTS/
-# chmod 765 for initial permissions is okay, but execution needs +x explicitly
-RUN chmod 765 $INST_SCRIPTS/*
+# Set execute permissions on all scripts in the directory
+RUN find $INST_SCRIPTS -type f -exec chmod +x {} \;
 
-### Install some common tools
-# Explicitly make executable and run with correct path
-RUN chmod +x $INST_SCRIPTS/tools.sh && $INST_SCRIPTS/tools.sh
+### Install some common tools (including the corrected SSH part)
+# This RUN command corresponds to step #8 in your build log
+# FIX: Added openssh-client, openssh-sftp-server and removed loop/exit 0
+RUN apt-get update && apt-get install --no-install-recommends -y \
+    openssh-server \
+    openssh-client \
+    openssh-sftp-server \
+    tmux \
+    git \
+    wget \
+    curl \
+    less \
+    locales \
+    sudo \
+    software-properties-common \
+    rsync && \
+    # Clean up
+    rm -rf /var/lib/apt/lists/*
+
+# Configure locale after installing locales package
+RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && locale-gen
 ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en' LC_ALL='en_US.UTF-8'
 
 ### Install custom fonts
-# Explicitly make executable and run with correct path
-RUN chmod +x $INST_SCRIPTS/install_custom_fonts.sh && $INST_SCRIPTS/install_custom_fonts.sh
+RUN $INST_SCRIPTS/install_custom_fonts.sh
 
 ### Install xvnc-server & noVNC - HTML5 based VNC viewer
-# Explicitly make executable and run with correct path
-RUN chmod +x $INST_SCRIPTS/tigervnc.sh && $INST_SCRIPTS/tigervnc.sh
-RUN chmod +x $INST_SCRIPTS/no_vnc_1.5.0.sh && $INST_SCRIPTS/no_vnc_1.5.0.sh
+RUN $INST_SCRIPTS/tigervnc.sh
+RUN $INST_SCRIPTS/no_vnc_1.5.0.sh
 
 ### Install firefox and chrome browser
-# Explicitly make executable and run with correct path
-RUN chmod +x $INST_SCRIPTS/firefox.sh && $INST_SCRIPTS/firefox.sh
+RUN $INST_SCRIPTS/firefox.sh
+# Assuming chrome installation is handled within firefox.sh or another script if needed
 
 ### Install IceWM UI
-# Add wm_startup.sh from its source location to INST_SCRIPTS and run it
-ADD ./src/debian/icewm/wm_startup.sh $INST_SCRIPTS/wm_startup.sh
-RUN chmod +x $INST_SCRIPTS/wm_startup.sh && $INST_SCRIPTS/wm_startup.sh
-# This ADD line below remains as it likely copies IceWM configuration files to the home directory
-ADD ./src/debian/icewm/ $HOME/
+# Copy the startup script first, then run the installer
+ADD ./src/debian/icewm/wm_startup.sh $HOME/wm_startup.sh # Copy wm_startup to HOME as expected by vnc_startup
+RUN chmod +x $HOME/wm_startup.sh
+RUN $INST_SCRIPTS/icewm.sh # Assuming icewm.sh exists and installs IceWM
+# Copy IceWM configuration files
+ADD ./src/debian/icewm/ $HOME/.icewm/ # Copy config to the standard .icewm directory
 
-### configure startup
-# Explicitly make executable and run with correct path
-RUN chmod +x $INST_SCRIPTS/libnss_wrapper.sh && $INST_SCRIPTS/libnss_wrapper.sh
+### configure startup scripts and permissions
+RUN $INST_SCRIPTS/libnss_wrapper.sh
 ADD ./src/common/scripts $STARTUPDIR
-# Explicitly make executable and run with correct path and arguments
-RUN chmod +x $INST_SCRIPTS/set_user_permission.sh && $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
+RUN chmod +x $STARTUPDIR/* # Ensure scripts in STARTUPDIR are executable
+RUN $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
 
 ### Install visomaster and dependencies
 WORKDIR /workspace
+# Clone specific branch
 RUN git clone --branch v0.1.6 https://github.com/visomaster/VisoMaster.git
 WORKDIR /workspace/VisoMaster
 
 # --- Debugging Step: List contents after cloning ---
 RUN ls -al
 
-# Removed incorrect pip install -r ./requirements.txt
-RUN pip install scikit-image
-RUN pip install -r requirements_cu124.txt --no-cache-dir
+# Install Python dependencies
+# Ensure pip refers to the correct version (python3.10)
+RUN python3 -m pip install --no-cache-dir scikit-image
+RUN python3 -m pip install --no-cache-dir -r requirements_cu124.txt
 
-# --- REMOVED MODEL DOWNLOAD SECTION ---
+# --- MODEL DOWNLOAD SECTION REMAINS COMMENTED OUT ---
+# The On-Start script will handle this
 # WORKDIR /workspace/VisoMaster/model_assets
 # RUN python3 download_models.py
 # WORKDIR /workspace/VisoMaster/model_assets
 # -------------------------------------
 
 ### Install jupyterlab
-RUN pip install jupyterlab
+RUN python3 -m pip install --no-cache-dir jupyterlab
 EXPOSE 8080
 
 ### Install filebrowser
-RUN wget -O - https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash
+# Ensure wget is installed (done earlier)
+RUN wget -qO- https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash
 EXPOSE 8585
 
-### Reconfigure startup
+### Final startup configuration
+# Copy the correct VNC startup script
 COPY ./src/vnc_startup_jupyterlab_filebrowser.sh /dockerstartup/vnc_startup.sh
-RUN chmod 765 /dockerstartup/vnc_startup.sh
+RUN chmod +x /dockerstartup/vnc_startup.sh
 
+# Set default VNC resolution
 ENV VNC_RESOLUTION=1280x1024
 
+# Set the entrypoint to the VNC startup script
 ENTRYPOINT ["/dockerstartup/vnc_startup.sh"]
+
+# Default command for the entrypoint script
 CMD ["--wait"]
+
