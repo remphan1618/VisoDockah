@@ -96,7 +96,7 @@ RUN chmod +x $INST_SCRIPTS/set_user_permission.sh && $INST_SCRIPTS/set_user_perm
 ### Install visomaster and dependencies
 WORKDIR /workspace
 RUN git clone --branch v0.1.6 https://github.com/visomaster/VisoMaster.git
-WORKDIR /workspace/visomaster
+WORKDIR /workspace/VisoMaster
 
 # --- Debugging Step: List contents after cloning ---
 RUN ls -al
@@ -106,9 +106,9 @@ RUN pip install scikit-image
 RUN pip install -r requirements_cu124.txt --no-cache-dir
 
 # --- REMOVED MODEL DOWNLOAD SECTION ---
-# WORKDIR /workspace/visomaster/model_assets
+# WORKDIR /workspace/VisoMaster/model_assets
 # RUN python3 download_models.py
-# WORKDIR /workspace/visomaster/model_assets
+# WORKDIR /workspace/VisoMaster/model_assets
 # -------------------------------------
 
 ### Install jupyterlab
