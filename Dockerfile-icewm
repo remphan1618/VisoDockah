@@ -47,19 +47,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Configure timezone
     ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
     dpkg-reconfigure -f noninteractive tzdata && \
-    # Clean up apt cache
-    apt-get clean && \
+    # Clean up
     rm -rf /var/lib/apt/lists/*
 
 ### Install Miniconda
+# FIX: Install Miniconda in one step
 RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
     bash miniconda.sh -b -p /opt/conda && \
-    rm miniconda.sh && \
-    # Clean conda cache after install
-    conda clean --all -y
+    rm miniconda.sh
 
 ### Add Conda to the PATH
+# FIX: Add conda to PATH *before* trying to use conda commands
 ENV PATH /opt/conda/bin:$PATH
+
+### Clean Conda cache
+# FIX: Run conda clean in a separate step after PATH is updated
+RUN conda clean --all -y
 
 ### Add all install scripts for further steps
 # Using COPY instead of ADD for local files is generally preferred
@@ -102,6 +105,7 @@ RUN $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
 
 ### Create conda environment
 # Aligning with reference file: naming the env 'visomaster'
+# Now conda command should be found due to ENV PATH update
 RUN conda create -n visomaster python=3.10.13 -y && conda clean --all -y
 
 ### Activate the environment for subsequent RUN commands and set default
@@ -112,25 +116,24 @@ RUN echo "conda activate $CONDA_DEFAULT_ENV" >> ~/.bashrc
 ENV PATH /opt/conda/envs/$CONDA_DEFAULT_ENV/bin:$PATH
 
 ### Install CUDA and cuDNN via Conda
-RUN conda install -c nvidia/label/cuda-12.4.1 cuda-runtime -y && conda clean --all -y
-RUN conda install -c conda-forge cudnn -y && conda clean --all -y
+RUN conda install -c nvidia/label/cuda-12.4.1 cuda-runtime -y
+RUN conda install -c conda-forge cudnn -y
 
 ### Install visomaster
 WORKDIR /workspace
-# MODIFIED: Clone repo first, then checkout the specific tag v0.1.6
+# MODIFIED: Clone repo first, then checkout the specific tag v0.6.0
 RUN git clone https://github.com/visomaster/VisoMaster.git && \
     cd VisoMaster && \
-    git checkout v0.1.6 && \
+    git checkout v0.6.0 && \
     cd ..
 WORKDIR /workspace/VisoMaster
 
 ### Install dependencies within the Conda environment
-# MODIFIED: Removed installation of non-existent ./requirements.txt
-# RUN pip install -r ./requirements.txt --no-cache-dir
-RUN conda install scikit-image -y && conda clean --all -y
-# Install requirements and immediately purge pip cache
-RUN pip install -r requirements.txt && \
-    pip cache purge
+# Aligning with reference file installation order
+RUN pip install -r ./requirements.txt --no-cache-dir
+RUN conda install scikit-image -y
+# MODIFIED: Commented out requirements_cu124.txt installation as requested
+# RUN pip install -r requirements_cu124.txt --no-cache-dir
 
 ### Download models (MODIFIED: Removed from build - use On-Start script)
 # WORKDIR /workspace/VisoMaster/model_assets
@@ -138,7 +141,7 @@ RUN pip install -r requirements.txt && \
 # WORKDIR /workspace/VisoMaster # Return to VisoMaster root directory
 
 ### Install jupyterlab within the Conda environment
-RUN pip install jupyterlab --no-cache-dir && pip cache purge
+RUN pip install jupyterlab --no-cache-dir
 EXPOSE 8080
 
 ### Install filebrowser
