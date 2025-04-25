@@ -103,8 +103,8 @@ RUN git clone -b v0.1.6 https://github.com/visomaster/VisoMaster.git
 # Fix: ensure we use the correct capitalization as in the GitHub repository
 WORKDIR /workspace/VisoMaster
 
-### Install dependencies
-# Create a standard requirements.txt file with necessary dependencies (excluding TensorRT)
+### Install dependencies. Fix Models.py backslash path
+# Create requirements file with necessary dependencies but without the problematic TensorRT packages
 RUN echo "--extra-index-url https://download.pytorch.org/whl/cu124" > requirements.txt && \
     echo "numpy==1.26.4" >> requirements.txt && \
     echo "opencv-python==4.10.0.84" >> requirements.txt && \
@@ -129,14 +129,11 @@ RUN echo "--extra-index-url https://download.pytorch.org/whl/cu124" > requiremen
     echo "pyqt-toast-notification==1.3.2" >> requirements.txt && \
     echo "qdarkstyle" >> requirements.txt && \
     echo "pyqtdarktheme" >> requirements.txt
-
-# Install from the requirements file (standard name)
 RUN pip install -r requirements.txt --no-cache-dir
 
-### Download models
-WORKDIR /workspace/VisoMaster/model_assets
-RUN python download_models.py
+### Download models - fixed path to download_models.py
 WORKDIR /workspace/VisoMaster
+RUN python download_models.py
 
 ### Install jupyterlab
 RUN pip install jupyterlab
