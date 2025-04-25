@@ -80,8 +80,11 @@ RUN chmod +x $INST_SCRIPTS/no_vnc_1.5.0.sh && $INST_SCRIPTS/no_vnc_1.5.0.sh
 RUN chmod +x $INST_SCRIPTS/firefox.sh && $INST_SCRIPTS/firefox.sh
 
 ### Install IceWM UI
-# Explicitly make executable and run with correct path (this is where the error occurs if the file is missing)
-RUN chmod +x $INST_SCRIPTS/icewm_ui.sh && $INST_SCRIPTS/icewm_ui.sh
+# *** CORRECTED ***
+# Add wm_startup.sh from its source location to INST_SCRIPTS and run it
+ADD ./src/debian/icewm/wm_startup.sh $INST_SCRIPTS/wm_startup.sh
+RUN chmod +x $INST_SCRIPTS/wm_startup.sh && $INST_SCRIPTS/wm_startup.sh
+# This ADD line below remains as it likely copies IceWM configuration files to the home directory
 ADD ./src/debian/icewm/ $HOME/
 
 ### configure startup
