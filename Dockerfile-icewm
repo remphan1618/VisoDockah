@@ -61,7 +61,6 @@ ADD ./src/debian/install/ $INST_SCRIPTS/
 RUN chmod 765 $INST_SCRIPTS/*
 
 ### Install some common tools
-# Corrected path to tools.sh script
 RUN chmod +x $INST_SCRIPTS/tools.sh && $INST_SCRIPTS/tools.sh
 ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en' LC_ALL='en_US.UTF-8'
 
@@ -70,13 +69,13 @@ RUN $INST_SCRIPTS/install_custom_fonts.sh
 
 ### Install xvnc-server & noVNC - HTML5 based VNC viewer
 RUN $INST_SCRIPTS/tigervnc.sh
-RUN $INST_SCRIPTS/no_vnc_1.5.0.sh
 
 ### Install firefox and chrome browser
 RUN $INST_SCRIPTS/firefox.sh
 
 ### Install IceWM UI
-RUN $INST_SCRIPTS/icewm_ui.sh
+# Explicitly make the script executable before running it and use the correct path
+RUN chmod +x $INST_SCRIPTS/icewm_ui.sh && $INST_SCRIPTS/icewm_ui.sh
 ADD ./src/debian/icewm/ $HOME/
 
 ### configure startup
