@@ -58,30 +58,38 @@ RUN python3.10 -m pip install --upgrade pip && \
 ### Add all install scripts for further steps
 ADD ./src/common/install/ $INST_SCRIPTS/
 ADD ./src/debian/install/ $INST_SCRIPTS/
+# chmod 765 for initial permissions is okay, but execution needs +x explicitly
 RUN chmod 765 $INST_SCRIPTS/*
 
 ### Install some common tools
+# Explicitly make executable and run with correct path
 RUN chmod +x $INST_SCRIPTS/tools.sh && $INST_SCRIPTS/tools.sh
 ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en' LC_ALL='en_US.UTF-8'
 
 ### Install custom fonts
-RUN $INST_SCRIPTS/install_custom_fonts.sh
+# Explicitly make executable and run with correct path
+RUN chmod +x $INST_SCRIPTS/install_custom_fonts.sh && $INST_SCRIPTS/install_custom_fonts.sh
 
 ### Install xvnc-server & noVNC - HTML5 based VNC viewer
-RUN $INST_SCRIPTS/tigervnc.sh
+# Explicitly make executable and run with correct path
+RUN chmod +x $INST_SCRIPTS/tigervnc.sh && $INST_SCRIPTS/tigervnc.sh
+RUN chmod +x $INST_SCRIPTS/no_vnc_1.5.0.sh && $INST_SCRIPTS/no_vnc_1.5.0.sh
 
 ### Install firefox and chrome browser
-RUN $INST_SCRIPTS/firefox.sh
+# Explicitly make executable and run with correct path
+RUN chmod +x $INST_SCRIPTS/firefox.sh && $INST_SCRIPTS/firefox.sh
 
 ### Install IceWM UI
-# Explicitly make the script executable before running it and use the correct path
+# Explicitly make executable and run with correct path (this is where the error occurs if the file is missing)
 RUN chmod +x $INST_SCRIPTS/icewm_ui.sh && $INST_SCRIPTS/icewm_ui.sh
 ADD ./src/debian/icewm/ $HOME/
 
 ### configure startup
-RUN $INST_SCRIPTS/libnss_wrapper.sh
+# Explicitly make executable and run with correct path
+RUN chmod +x $INST_SCRIPTS/libnss_wrapper.sh && $INST_SCRIPTS/libnss_wrapper.sh
 ADD ./src/common/scripts $STARTUPDIR
-RUN $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
+# Explicitly make executable and run with correct path and arguments
+RUN chmod +x $INST_SCRIPTS/set_user_permission.sh && $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
 
 ### Install visomaster and dependencies
 WORKDIR /workspace
