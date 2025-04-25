@@ -1,46 +1,45 @@
 #!/bin/bash
+set -e
 
-# This script runs when the container starts
-# It downloads necessary models and sets up any outstanding dependencies
+# Provisioning script for Vast.ai template
+# This script runs ONCE when creating the template
 
-echo "Running VisoMaster onstart script..."
+echo "Running provisioning script..."
 
-# Add environment variables to /etc/environment
-env | grep _ >> /etc/environment
-echo "Environment variables added to /etc/environment"
-
-# Fix package dependency issues
-echo "Fixing package dependency issues..."
-# Update package lists
+# Fix package dependencies permanently
 apt-get update
-
-# Fix dependencies in correct order
 apt-get install -y --allow-downgrades libcurl4=7.81.0-1ubuntu1.16
-apt-get install -y curl
-apt-get install -y openssh-client=1:8.9p1-3ubuntu0.10
-apt-get install -y openssh-sftp-server
-apt-get install -y openssh-server
-echo "Package dependency issues fixed"
+apt-get install -y curl openssh-client=1:8.9p1-3ubuntu0.10 openssh-sftp-server openssh-server
+apt-get install -y rsync wget git tmux less locales sudo software-properties-common
 
-# Change to the VisoMaster directory
+# Set up SSH server properly
+mkdir -p /etc/ssh
+cat > /etc/ssh/sshd_config << 'EOL'
+Port 22
+PermitRootLogin yes
+StrictModes no
+ClientAliveInterval 10
+ClientAliveCountMax 2
+UsePAM no
+PasswordAuthentication no
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+ChallengeResponseAuthentication no
+LogLevel VERBOSE
+EOL
+
+# Create required directories
+mkdir -p /var/run/sshd
+chmod 0755 /var/run/sshd
+
+# Create log directory
+mkdir -p /var/log
+
+# Pre-install TensorRT to speed up container startup
 cd /workspace/VisoMaster
+pip install --no-cache-dir tensorrt==10.6.0 --extra-index-url https://pypi.nvidia.com
 
-# Try to install TensorRT (skipping if it fails due to space constraints)
-echo "Installing TensorRT packages..."
-pip install --no-cache-dir tensorrt==10.6.0 --extra-index-url https://pypi.nvidia.com || echo "TensorRT installation skipped"
+# Set up provisioning indicator
+touch /etc/.provisioned
 
-# Download models if they don't exist already
-echo "Checking for and downloading models..."
-python download_models.py
-
-# Set proper permissions for the model directory
-chmod -R 755 model_assets
-
-# Download and execute custom script from GitHub
-echo "Downloading custom script from GitHub..."
-GITHUB_SCRIPT_URL="https://raw.githubusercontent.com/remphan1618/VisoDockah/refs/heads/main/onstart.sh"
-curl -sSL $GITHUB_SCRIPT_URL -o /tmp/custom_script.sh
-chmod +x /tmp/custom_script.sh
-bash /tmp/custom_script.sh
-
-echo "VisoMaster onstart script completed"
+echo "Provisioning completed successfully"
