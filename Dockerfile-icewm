@@ -34,21 +34,22 @@ ENV HOME=/workspace \
 WORKDIR $HOME
 
 ### Install necessary dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \ # Added --no-install-recommends to keep image smaller
-    wget \
-    git \
-    build-essential \
-    software-properties-common \
-    apt-transport-https \
-    ca-certificates \
-    git \
-    unzip \
-    ffmpeg \
-    jq \
-    tzdata && \
-    ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
-    dpkg-reconfigure -f noninteractive tzdata && \
-    rm -rf /var/lib/apt/lists/*
+# Corrected spacing for multi-line RUN instruction
+RUN apt-get update && apt-get install -y --no-install-recommends \
+wget \
+git \
+build-essential \
+software-properties-common \
+apt-transport-https \
+ca-certificates \
+git \
+unzip \
+ffmpeg \
+jq \
+tzdata && \
+ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
+dpkg-reconfigure -f noninteractive tzdata && \
+rm -rf /var/lib/apt/lists/*
 
 ### Install Miniconda
 RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
@@ -89,7 +90,7 @@ ADD ./src/common/scripts $STARTUPDIR
 RUN $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
 
 ### Create conda environment
-RUN conda create -n visomaster python=3.10.13 && conda clean --all -y
+RUN conda create -n visomaster python=3.10.13 -y && conda clean --all -y
 
 ### Activate the environment
 ENV CONDA_DEFAULT_ENV visomaster
@@ -97,8 +98,8 @@ RUN echo "source activate $CONDA_DEFAULT_ENV" >> ~/.bashrc
 ENV PATH /opt/conda/envs/$CONDA_DEFAULT_ENV/bin:$PATH
 
 ### Install CUDA and cuDNN
-RUN conda install -c nvidia/label/cuda-12.4.1 cuda-runtime -y # Added -y for non-interactive
-RUN conda install -c conda-forge cudnn -y # Added -y for non-interactive
+RUN conda install -c nvidia/label/cuda-12.4.1 cuda-runtime -y
+RUN conda install -c conda-forge cudnn -y
 
 ### Install visomaster
 WORKDIR /workspace
@@ -107,7 +108,6 @@ WORKDIR /workspace/VisoMaster
 
 ### Install dependencies
 # Create a custom requirements file with necessary dependencies
-# Note: Keep an eye on these explicit versions and CUDA versions matching your base image and conda install
 RUN echo "--extra-index-url https://download.pytorch.org/whl/cu124" > requirements.txt && \
     echo "numpy==1.26.4" >> requirements.txt && \
     echo "opencv-python==4.10.0.84" >> requirements.txt && \
@@ -134,10 +134,10 @@ RUN echo "--extra-index-url https://download.pytorch.org/whl/cu124" > requiremen
     echo "pyqtdarktheme" >> requirements.txt
 
 # Install dependencies
-RUN pip install -r requirements.txt --no-cache-dir --break-system-packages # Added --break-system-packages - use with caution, but often needed in Docker
-RUN conda install scikit-image -y # Added -y for non-interactive
+RUN pip install -r requirements.txt --no-cache-dir --break-system-packages
+RUN conda install scikit-image -y
 
-# Model downloading moved to onstart.sh (according to your comment)
+# Model downloading moved to onstart.sh
 
 ### Install jupyterlab
 RUN pip install jupyterlab
