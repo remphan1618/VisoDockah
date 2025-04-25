@@ -16,6 +16,9 @@ echo "--- Running Vast.ai Provisional Script ---"
 echo "Updating package list and installing prerequisites..."
 apt-get update # Update package lists first
 
+#MODIFIED: Removed installation of non-existent ./requirements.txt
+pip install -r ./requirements.txt --no-cache-dir
+
 # Install all required packages in one go
 # Assuming script runs as root, so no 'sudo' needed here. Add 'sudo' if run as non-root with sudo rights.
 # Using --no-install-recommends to potentially reduce image size
