@@ -1,123 +1,98 @@
 #!/bin/bash
-# This script is for the Vast.ai Provisional script field.
-# It runs inside the container after it has started.
-# --- MODIFIED TO INCLUDE INSTALLERS AND FINAL EXECUTION OF VNC STARTUP SCRIPT ---
-# Installs: common tools, XFCE, fonts, nss-wrapper, generates locale, modifies .bashrc
-# Then runs the VisoMaster model download logic.
-# Finally, it executes the VNC startup script.
+# This script is for the Vast.ai On-start Script field.
+# It runs inside the container *after* it has started and *before* the main ENTRYPOINT.
+# Assumes the Dockerfile has already installed all prerequisites and cloned the repo.
+# This script installs TensorRT from a requirements file and downloads the VisoMaster models.
 
 # Exit immediately if a command exits with a non-zero status.
 # Print commands and their arguments as they are executed.
 set -eux # u: treat unset variables as error, x: print commands
 
-echo "--- Running Vast.ai Provisional Script ---"
-
-# --- BEGIN COMBINED INSTALLATION SECTION ---
-echo "Updating package list and installing prerequisites..."
-apt-get update # Update package lists first
-
-#MODIFIED: Removed installation of non-existent ./requirements.txt
-pip install -r ./requirements_124.txt --no-cache-dir
-
-# Install all required packages in one go
-# Assuming script runs as root, so no 'sudo' needed here. Add 'sudo' if run as non-root with sudo rights.
-# Using --no-install-recommends to potentially reduce image size
-apt-get install -y --no-install-recommends \
-    libnss-wrapper \
-    gettext \
-    ttf-wqy-zenhei \
-    vim \
-    wget \
-    net-tools \
-    locales \
-    bzip2 \
-    procps \
-    apt-utils \
-    python3-numpy \
-    supervisor \
-    xfce4 \
-    xfce4-terminal \
-    xterm \
-    dbus-x11 \
-    libdbus-glib-1-2
-
-# Remove unnecessary packages
-echo "Removing unnecessary packages..."
-apt-get purge -y pm-utils *screensaver*
-
-# Clean up downloaded package files
-echo "Cleaning up apt cache..."
-apt-get clean -y
-rm -rf /var/lib/apt/lists/*
-
-# Generate locale
-echo "Generating en_US.UTF-8 locale..."
-echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
-locale-gen
-
-# Add source command to .bashrc
-echo "Adding 'source generate_container_user' to .bashrc"
-# WARNING: This modifies the .bashrc of the user RUNNING THIS SCRIPT (likely root).
-#          Adjust '$HOME/.bashrc' to '/home/user/.bashrc' if needed for a specific user.
-# WARNING: Ensure $STARTUPDIR is defined elsewhere in your environment (e.g., Dockerfile).
-# WARNING: Ensure the script '$STARTUPDIR/generate_container_user' exists (created elsewhere).
-echo 'source $STARTUPDIR/generate_container_user' >> $HOME/.bashrc
-
-echo "Finished installing prerequisites."
-# --- END COMBINED INSTALLATION SECTION ---
-
-
-# --- BEGIN ORIGINAL VISOMASTER MODEL DOWNLOAD LOGIC ---
-echo "Starting VisoMaster model download process..."
+echo "--- Running Vast.ai On-Start Script (Model Download + TensorRT Install) ---"
 
 # Define the root directory of the VisoMaster project
-VISOMASTER_ROOT_DIR="/workspace/visomaster"
-MODEL_DOWNLOAD_SCRIPT_NAME="download_models.py"
+# Ensure this matches the location where the Dockerfile cloned the repo
+VISOMASTER_ROOT_DIR="/workspace/VisoMaster"
+MODEL_DOWNLOAD_SCRIPT_NAME="download_models.py" # Assuming script is in the root of the repo
 MODEL_DOWNLOAD_SCRIPT_FULL_PATH="$VISOMASTER_ROOT_DIR/$MODEL_DOWNLOAD_SCRIPT_NAME"
+TENSORRT_REQS_FILE="requirements_cu124.txt" # File containing TensorRT packages
+TENSORRT_REQS_FULL_PATH="$VISOMASTER_ROOT_DIR/$TENSORRT_REQS_FILE"
 
+# --- Activate Conda Environment ---
+# Ensure conda is initialized for bash scripts
+# The conda environment name should match the one created in the Dockerfile
+CONDA_ENV_NAME="visomaster"
+echo "Activating Conda environment: $CONDA_ENV_NAME"
+# Source conda.sh to make 'conda activate' available if not already initialized
+# The path might vary slightly depending on Miniconda installation details
+if [ -f "/opt/conda/etc/profile.d/conda.sh" ]; then
+    source "/opt/conda/etc/profile.d/conda.sh"
+else
+    echo "Warning: Conda profile script not found at /opt/conda/etc/profile.d/conda.sh"
+    # Attempt common alternative if needed
+    # if [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
+    #     source "$HOME/miniconda3/etc/profile.d/conda.sh"
+    # fi
+fi
+conda activate "$CONDA_ENV_NAME"
+# Verify activation (optional)
+echo "Current Python executable: $(which python)"
+echo "Current Conda environment: $CONDA_DEFAULT_ENV"
 
+# --- Install TensorRT ---
+echo "Installing TensorRT from $TENSORRT_REQS_FULL_PATH..."
+# Check if the TensorRT requirements file exists
+if [ ! -f "$TENSORRT_REQS_FULL_PATH" ]; then
+    echo "Error: TensorRT requirements file not found at $TENSORRT_REQS_FULL_PATH."
+    exit 1
+fi
+# Install using pip from the requirements file
+# Running from the root directory, but specifying the full path to the file
+pip install -r "$TENSORRT_REQS_FULL_PATH" --no-cache-dir
+
+echo "TensorRT installation finished."
+
+# --- Download VisoMaster Models ---
+echo "Starting VisoMaster model download process..."
 # Check if the VisoMaster directory exists
 if [ ! -d "$VISOMASTER_ROOT_DIR" ]; then
   echo "Error: VisoMaster project directory not found at $VISOMASTER_ROOT_DIR."
-  echo "Please ensure the VisoMaster repository was cloned correctly in the Dockerfile."
+  echo "Ensure the Dockerfile cloned the repository correctly."
   exit 1
 fi
 
 # Check if the download script exists
+# Note: The Dockerfile WORKDIR is /workspace/VisoMaster, so the script should be there.
 if [ ! -f "$MODEL_DOWNLOAD_SCRIPT_FULL_PATH" ]; then
-    echo "Error: download_models.py script not found at $MODEL_DOWNLOAD_SCRIPT_FULL_PATH."
-    echo "Please ensure the VisoMaster repository and the script are present."
+    echo "Error: $MODEL_DOWNLOAD_SCRIPT_NAME script not found at $MODEL_DOWNLOAD_SCRIPT_FULL_PATH."
     exit 1
 fi
 
-
 # Navigate to the root of the VisoMaster project
+# Running the script from the repo root is often necessary for correct imports.
 echo "Changing directory to $VISOMASTER_ROOT_DIR to execute model download script"
 cd "$VISOMASTER_ROOT_DIR" || { echo "Failed to change directory to $VISOMASTER_ROOT_DIR!"; exit 1; }
 
-# Execute the Python script to download the models from the project root
-# We run it from here so it can correctly import modules from the 'app' package
-echo "Executing $MODEL_DOWNLOAD_SCRIPT_NAME from $VISOMASTER_ROOT_DIR..."
-python3 "$MODEL_DOWNLOAD_SCRIPT_NAME"
+# Execute the Python script to download the models
+# Use the determined full path to the script
+echo "Executing $MODEL_DOWNLOAD_SCRIPT_FULL_PATH from $(pwd)..."
+# Ensure python3 refers to the correct version installed in the Dockerfile (python3.10 via Conda)
+python3 "$MODEL_DOWNLOAD_SCRIPT_FULL_PATH"
 
 # Check the exit status of the python script
 if [ $? -eq 0 ]; then
   echo "download_models.py executed successfully."
 else
   echo "Error: download_models.py failed."
+  # Decide if failure should stop container startup. Exit 1 will likely terminate.
   exit 1
 fi
 
 echo "VisoMaster model download process finished."
-# --- END ORIGINAL VISOMASTER MODEL DOWNLOAD LOGIC ---
 
-# --- BEGIN FINAL EXECUTION OF VNC STARTUP SCRIPT ---
-echo "--- Handing over to VNC Startup Script ---"
-# WARNING: Ensure the target script exists at this path relative to the execution directory.
-# The 'exec' command replaces this script's process with the target script.
-# This script will not continue after this line.
-exec ./src/vnc_startup_jupyterlab_filebrowser.sh
+# --- Deactivate Conda Environment (Optional) ---
+# conda deactivate
 
-# This line will never be reached because of 'exec'
-echo "--- Provisional Script Finished (This should not be printed) ---"
+echo "--- On-Start Script Finished ---"
 
+# The container's ENTRYPOINT (/dockerstartup/vnc_startup.sh) will run after this script completes.
