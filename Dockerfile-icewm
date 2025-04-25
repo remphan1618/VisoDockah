@@ -47,13 +47,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Configure timezone
     ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
     dpkg-reconfigure -f noninteractive tzdata && \
-    # Clean up
+    # Clean up apt cache
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 ### Install Miniconda
 RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
     bash miniconda.sh -b -p /opt/conda && \
-    rm miniconda.sh
+    rm miniconda.sh && \
+    # Clean conda cache after install
+    conda clean --all -y
 
 ### Add Conda to the PATH
 ENV PATH /opt/conda/bin:$PATH
@@ -109,8 +112,8 @@ RUN echo "conda activate $CONDA_DEFAULT_ENV" >> ~/.bashrc
 ENV PATH /opt/conda/envs/$CONDA_DEFAULT_ENV/bin:$PATH
 
 ### Install CUDA and cuDNN via Conda
-RUN conda install -c nvidia/label/cuda-12.4.1 cuda-runtime -y
-RUN conda install -c conda-forge cudnn -y
+RUN conda install -c nvidia/label/cuda-12.4.1 cuda-runtime -y && conda clean --all -y
+RUN conda install -c conda-forge cudnn -y && conda clean --all -y
 
 ### Install visomaster
 WORKDIR /workspace
@@ -124,8 +127,10 @@ WORKDIR /workspace/VisoMaster
 ### Install dependencies within the Conda environment
 # MODIFIED: Removed installation of non-existent ./requirements.txt
 # RUN pip install -r ./requirements.txt --no-cache-dir
-RUN conda install scikit-image -y
-RUN pip install -r requirements_cu124.txt --no-cache-dir
+RUN conda install scikit-image -y && conda clean --all -y
+# Install requirements and immediately purge pip cache
+RUN pip install -r requirements_cu124.txt && \
+    pip cache purge
 
 ### Download models (MODIFIED: Removed from build - use On-Start script)
 # WORKDIR /workspace/VisoMaster/model_assets
@@ -133,7 +138,7 @@ RUN pip install -r requirements_cu124.txt --no-cache-dir
 # WORKDIR /workspace/VisoMaster # Return to VisoMaster root directory
 
 ### Install jupyterlab within the Conda environment
-RUN pip install jupyterlab --no-cache-dir
+RUN pip install jupyterlab --no-cache-dir && pip cache purge
 EXPOSE 8080
 
 ### Install filebrowser
