@@ -66,26 +66,12 @@ ADD ./src/debian/install/ $INST_SCRIPTS/
 # Set execute permissions on all scripts in the directory
 RUN find $INST_SCRIPTS -type f -exec chmod +x {} \;
 
-### Install some common tools (including the corrected SSH part)
-# This RUN command corresponds to step #8 in your build log
-# FIX: Added openssh-client, openssh-sftp-server and removed loop/exit 0
-RUN apt-get update && apt-get install --no-install-recommends -y \
-    openssh-server \
-    openssh-client \
-    openssh-sftp-server \
-    tmux \
-    git \
-    wget \
-    curl \
-    less \
-    locales \
-    sudo \
-    software-properties-common \
-    rsync && \
-    # Clean up
-    rm -rf /var/lib/apt/lists/*
+### Install some common tools using the script
+# MODIFIED: Use tools.sh instead of explicit apt-get install for common tools/SSH
+RUN $INST_SCRIPTS/tools.sh
+# Assuming tools.sh installs 'locales' package if needed for the next step
 
-# Configure locale after installing locales package
+# Configure locale (ensure 'locales' package is installed by tools.sh)
 RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && locale-gen
 ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en' LC_ALL='en_US.UTF-8'
 
@@ -100,11 +86,14 @@ RUN $INST_SCRIPTS/no_vnc_1.5.0.sh
 RUN $INST_SCRIPTS/firefox.sh
 # Assuming chrome installation is handled within firefox.sh or another script if needed
 
-### Install IceWM UI
-# Copy the startup script first, then run the installer
+### Install IceWM UI using wm_startup.sh
+# Copy the startup script first, then run it (assuming it handles setup)
 ADD ./src/debian/icewm/wm_startup.sh $HOME/wm_startup.sh # Copy wm_startup to HOME as expected by vnc_startup
 RUN chmod +x $HOME/wm_startup.sh
-RUN $INST_SCRIPTS/icewm.sh # Assuming icewm.sh exists and installs IceWM
+# MODIFIED: Run wm_startup.sh for IceWM setup instead of icewm.sh
+RUN $HOME/wm_startup.sh
+# FIX: Explicitly create the .icewm directory before copying files into it
+RUN mkdir -p $HOME/.icewm
 # Copy IceWM configuration files
 ADD ./src/debian/icewm/ $HOME/.icewm/ # Copy config to the standard .icewm directory
 
