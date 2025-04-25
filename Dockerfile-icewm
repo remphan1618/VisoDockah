@@ -164,10 +164,6 @@ RUN sed -i 's#jupyter lab --ip=0.0.0.0 --port=8080 --allow-root --no-browser#jup
 
 ENV VNC_RESOLUTION=1280x1024
 
-# Copy onstart script into the container
-COPY ./VisoMaster/onstart.sh /workspace/onstart.sh
-RUN chmod +x /workspace/onstart.sh
-
 # Fix JSON formatting to prevent "JSONArgsRecommended" warning
 ENTRYPOINT ["sh", "-c"]
 CMD ["/dockerstartup/vnc_startup.sh && sleep infinity"]
