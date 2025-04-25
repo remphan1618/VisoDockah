@@ -1,9 +1,10 @@
 #!/bin/bash
 set -e
 
-# COMPREHENSIVE Provisioning script for Vast.ai template
-# This script runs ONCE when creating the template
-# All functionality is included here to minimize onstart script needs
+# PROVISION SCRIPT FOR VAST.AI TEMPLATE
+# ====================================
+# COPY THIS ENTIRE SCRIPT INTO THE "PROVISION SCRIPT" FIELD IN VAST.AI
+# This runs ONCE when creating the template and sets up everything
 
 echo "Running comprehensive provisioning script..."
 
@@ -84,5 +85,6 @@ touch /etc/.provisioned
 
 echo "Comprehensive provisioning completed successfully"
 echo "====================================================================="
-echo "IMPORTANT: Use this onstart command in Vast.ai: bash /workspace/minimal_onstart.sh"
+echo "IMPORTANT: After creating the template, use this for the onstart command field:"
+echo "bash /workspace/minimal_onstart.sh"
 echo "====================================================================="
