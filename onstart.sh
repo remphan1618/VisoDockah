@@ -8,10 +8,25 @@ set -e
 
 echo "Running comprehensive provisioning script..."
 
-# Fix package dependencies permanently
+# Fix APT sources to ensure consistent package versions
+echo "Fixing package repositories for consistent dependency versions..."
+cp /etc/apt/sources.list /etc/apt/sources.list.bak || true
+cat > /etc/apt/sources.list << 'EOL'
+deb http://archive.ubuntu.com/ubuntu/ jammy main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu/ jammy-updates main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu/ jammy-security main restricted universe multiverse
+EOL
+
+# Clean APT cache and update with fixed repositories
+apt-get clean
 apt-get update
+
+# Fix package dependencies permanently - install in correct order with version pinning
+echo "Installing packages with correct version dependencies..."
 apt-get install -y --allow-downgrades libcurl4=7.81.0-1ubuntu1.16
-apt-get install -y curl openssh-client=1:8.9p1-3ubuntu0.10 openssh-sftp-server openssh-server
+apt-get install -y --allow-downgrades openssh-client=1:8.9p1-3ubuntu0.10
+apt-get install -y --allow-downgrades openssh-sftp-server
+apt-get install -y --allow-downgrades openssh-server curl
 apt-get install -y rsync wget git tmux less locales sudo software-properties-common
 
 # Set up SSH server properly
@@ -73,6 +88,12 @@ chmod +x /workspace/start_ssh.sh
 cat > /workspace/minimal_onstart.sh << 'EOL'
 #!/bin/bash
 # Minimal onstart script for Vast.ai
+
+# Fix the package dependencies in case they've been changed
+apt-get clean
+apt-get update
+apt-get install -y --allow-downgrades libcurl4=7.81.0-1ubuntu1.16 openssh-client=1:8.9p1-3ubuntu0.10 openssh-sftp-server openssh-server curl || true
+
 /workspace/start_ssh.sh
 env | grep _ >> /etc/environment
 /workspace/run_github_script.sh
