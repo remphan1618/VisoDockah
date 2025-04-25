@@ -1,3 +1,6 @@
+# syntax=docker/dockerfile:1
+# check=skip=JSONArgsRecommended
+
 FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
 
 ENV REFRESHED_AT 2024-08-12
@@ -10,7 +13,7 @@ LABEL io.k8s.description="Headless VNC Container with Xfce window manager, firef
 
 ### Connection ports for controlling the UI:
 ### VNC port:5901
-### noVNC webport, connect via http://IP:6901/?password=vncpassword
+### noVNC webport, 
 ENV DISPLAY=:1 \
     VNC_PORT=5901 \
     NO_VNC_PORT=6901
@@ -164,6 +167,5 @@ RUN sed -i 's#jupyter lab --ip=0.0.0.0 --port=8080 --allow-root --no-browser#jup
 
 ENV VNC_RESOLUTION=1280x1024
 
-# Fix JSON formatting to prevent "JSONArgsRecommended" warning
-ENTRYPOINT ["sh", "-c"]
-CMD ["/dockerstartup/vnc_startup.sh && sleep infinity"]
+# Properly formatted ENTRYPOINT and CMD to fix JSON warnings
+ENTRYPOINT ["/dockerstartup/vnc_startup.sh"]
