@@ -1,9 +1,10 @@
 #!/bin/bash
 # This script is for the Vast.ai Provisional script field.
 # It runs inside the container after it has started.
-# --- MODIFIED TO INCLUDE INSTALLERS FROM PROVIDED SCRIPTS ---
+# --- MODIFIED TO INCLUDE INSTALLERS AND FINAL EXECUTION OF VNC STARTUP SCRIPT ---
 # Installs: common tools, XFCE, fonts, nss-wrapper, generates locale, modifies .bashrc
-# Then runs the original VisoMaster model download logic.
+# Then runs the VisoMaster model download logic.
+# Finally, it executes the VNC startup script.
 
 # Exit immediately if a command exits with a non-zero status.
 # Print commands and their arguments as they are executed.
@@ -107,9 +108,13 @@ fi
 echo "VisoMaster model download process finished."
 # --- END ORIGINAL VISOMASTER MODEL DOWNLOAD LOGIC ---
 
-echo "--- Provisional Script Finished ---"
+# --- BEGIN FINAL EXECUTION OF VNC STARTUP SCRIPT ---
+echo "--- Handing over to VNC Startup Script ---"
+# WARNING: Ensure the target script exists at this path relative to the execution directory.
+# The 'exec' command replaces this script's process with the target script.
+# This script will not continue after this line.
+exec ./src/vnc_startup_jupyterlab_filebrowser.sh
 
-# Note: The Dockerfile's ENTRYPOINT script (like the vnc_startup.sh you provided elsewhere)
-# is typically what starts the VNC server, JupyterLab, FileBrowser, etc.
-# This provisional script runs *after* the container starts but potentially before
-# the main application startup logic in the ENTRYPOINT. Ensure dependencies are met.
+# This line will never be reached because of 'exec'
+echo "--- Provisional Script Finished (This should not be printed) ---"
+
