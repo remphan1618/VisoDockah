@@ -26,10 +26,11 @@ ENV HOME=/workspace \
     VNC_COL_DEPTH=24 \
     VNC_PW=vncpassword \
     VNC_VIEW_ONLY=false \
-    TZ=Asia/Seoul
+    TZ=Asia/Seoul \
+    JUPYTER_DIR=/
 WORKDIR $HOME
 
-### Install necessary dependencies
+### Install necessary dependencies and Python 3.10
 RUN apt-get update && apt-get install -y \
     wget \
     git \
@@ -41,18 +42,18 @@ RUN apt-get update && apt-get install -y \
     unzip \
     ffmpeg \
     jq \
-    tzdata && \
+    tzdata \
+    python3.10 \
+    python3.10-venv \
+    python3-pip && \
     ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
     dpkg-reconfigure -f noninteractive tzdata && \
     rm -rf /var/lib/apt/lists/*
 
-### Install Miniconda
-RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
-bash miniconda.sh -b -p /opt/conda && \
-rm miniconda.sh
-
-### Add Conda to the PATH
-ENV PATH /opt/conda/bin:$PATH
+### Update pip and set default python3 alias to 3.10
+RUN python3.10 -m pip install --upgrade pip && \
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 && \
+    update-alternatives --install /usr/bin/pip3 pip3 /usr/bin/pip3 /usr/bin/python3.10-pip 1
 
 ### Add all install scripts for further steps
 ADD ./src/common/install/ $INST_SCRIPTS/
@@ -82,32 +83,20 @@ RUN $INST_SCRIPTS/libnss_wrapper.sh
 ADD ./src/common/scripts $STARTUPDIR
 RUN $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
 
-### Create conda environment
-RUN conda create -n visomaster python=3.10.13 && conda clean --all -y
-
-### Activate the environment
-ENV CONDA_DEFAULT_ENV Rope
-RUN echo "source activate $CONDA_DEFAULT_ENV" >> ~/.bashrc
-ENV PATH /opt/conda/envs/$CONDA_DEFAULT_ENV/bin:$PATH
-
-### Install CUDA and cuDNN
-RUN conda install -c nvidia/label/cuda-12.4.1 cuda-runtime
-RUN conda install -c conda-forge cudnn
-
-### Install visomaster
+### Install visomaster and dependencies
 WORKDIR /workspace
-RUN git clone https://github.com/visomaster/VisoMaster.git
+RUN git clone --branch v0.1.6 https://github.com/visomaster/VisoMaster.git
 WORKDIR /workspace/visomaster
 
-### Install dependencies. Fix Models.py backslash path
-RUN pip install -r ./requirements.txt --no-cache-dir
-RUN conda install scikit-image
-RUN pip install -r requirements_cu124.txt
+# Removed incorrect pip install -r ./requirements.txt
+RUN pip install scikit-image
+RUN pip install -r requirements_cu124.txt --no-cache-dir
 
-### Download models
-WORKDIR /workspace/visomaster/model_assets
-RUN python download_models.py
-WORKDIR /workspace/visomaster/model_assets
+# --- REMOVED MODEL DOWNLOAD SECTION ---
+# WORKDIR /workspace/visomaster/model_assets
+# RUN python3 download_models.py
+# WORKDIR /workspace/visomaster/model_assets
+# -------------------------------------
 
 ### Install jupyterlab
 RUN pip install jupyterlab
