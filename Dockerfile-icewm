@@ -54,8 +54,6 @@ RUN apt-get update && apt-get install -y \
 RUN python3.10 -m pip install --upgrade pip && \
     update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 && \
     update-alternatives --install /usr/bin/pip3 pip3 /usr/bin/pip3.10 1
-    # Corrected the update-alternatives command for pip3:
-    # Changed <path> from /usr/bin/pip3 to /usr/bin/pip3.10 and fixed priority argument.
 
 ### Add all install scripts for further steps
 ADD ./src/common/install/ $INST_SCRIPTS/
@@ -63,7 +61,8 @@ ADD ./src/debian/install/ $INST_SCRIPTS/
 RUN chmod 765 $INST_SCRIPTS/*
 
 ### Install some common tools
-RUN chmod +x /src/debian/install/tools.sh && /src/debian/install/tools.sh
+# Corrected path to tools.sh script
+RUN chmod +x $INST_SCRIPTS/tools.sh && $INST_SCRIPTS/tools.sh
 ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en' LC_ALL='en_US.UTF-8'
 
 ### Install custom fonts
