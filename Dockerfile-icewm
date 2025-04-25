@@ -28,12 +28,11 @@ ENV HOME=/workspace \
     VNC_COL_DEPTH=24 \
     VNC_PW=vncpassword \
     VNC_VIEW_ONLY=false \
-    TZ=Asia/Seoul \
-    JUPYTER_DIR=/
+    TZ=Asia/Seoul
+    # JUPYTER_DIR is removed as Jupyter will run within Conda env
 WORKDIR $HOME
 
-### Install necessary dependencies and Python 3.10
-# Combine installations where possible, ensure tzdata config runs
+### Install necessary base dependencies (excluding python which will come from Conda)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     git \
@@ -44,30 +43,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     ffmpeg \
     jq \
-    tzdata \
-    python3.10 \
-    python3.10-venv \
-    python3-pip && \
+    tzdata && \
     # Configure timezone
     ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
     dpkg-reconfigure -f noninteractive tzdata && \
     # Clean up
     rm -rf /var/lib/apt/lists/*
 
-### Update pip and set default python3 alias to 3.10
-RUN python3.10 -m pip install --upgrade pip && \
-    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 # && \
-    # update-alternatives --install /usr/bin/pip3 pip3 /usr/bin/pip3.10 1 # This line might be unnecessary if pip3 already points correctly
+### Install Miniconda
+RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
+    bash miniconda.sh -b -p /opt/conda && \
+    rm miniconda.sh
+
+### Add Conda to the PATH
+ENV PATH /opt/conda/bin:$PATH
 
 ### Add all install scripts for further steps
-# Ensure the source paths match your project structure
-ADD ./src/common/install/ $INST_SCRIPTS/
-ADD ./src/debian/install/ $INST_SCRIPTS/
-# Set execute permissions on all scripts in the directory
-RUN find $INST_SCRIPTS -type f -exec chmod +x {} \;
+# Using COPY instead of ADD for local files is generally preferred
+COPY ./src/common/install/ $INST_SCRIPTS/
+COPY ./src/debian/install/ $INST_SCRIPTS/
+
+### Give executable permissions to all the scripts in $INST_SCRIPTS
+# Using the simpler chmod pattern from the reference file
+RUN chmod +x $INST_SCRIPTS/*.sh
 
 ### Install some common tools using the script
-# MODIFIED: Use tools.sh instead of explicit apt-get install for common tools/SSH
 RUN $INST_SCRIPTS/tools.sh
 # Assuming tools.sh installs 'locales' package if needed for the next step
 
@@ -86,46 +86,51 @@ RUN $INST_SCRIPTS/no_vnc_1.5.0.sh
 RUN $INST_SCRIPTS/firefox.sh
 # Assuming chrome installation is handled within firefox.sh or another script if needed
 
-### Install IceWM UI using wm_startup.sh
-# Copy the startup script first, then run it (assuming it handles setup)
-ADD ./src/debian/icewm/wm_startup.sh $HOME/wm_startup.sh # Copy wm_startup to HOME as expected by vnc_startup
-RUN chmod +x $HOME/wm_startup.sh
-# MODIFIED: Run wm_startup.sh for IceWM setup instead of icewm.sh
-RUN $HOME/wm_startup.sh
-# FIX: Explicitly create the .icewm directory before copying files into it
-RUN mkdir -p $HOME/.icewm
-# Copy IceWM configuration files
-ADD ./src/debian/icewm/ $HOME/.icewm/ # Copy config to the standard .icewm directory
+### Install xfce UI
+# Aligning with the reference file: using xfce_ui.sh and copying config to $HOME
+RUN $INST_SCRIPTS/xfce_ui.sh
+COPY ./src/common/xfce/ $HOME/
 
 ### configure startup scripts and permissions
 RUN $INST_SCRIPTS/libnss_wrapper.sh
-ADD ./src/common/scripts $STARTUPDIR
+COPY ./src/common/scripts $STARTUPDIR
 RUN chmod +x $STARTUPDIR/* # Ensure scripts in STARTUPDIR are executable
 RUN $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
 
-### Install visomaster and dependencies
+### Create conda environment
+# Aligning with reference file: naming the env 'visomaster'
+RUN conda create -n visomaster python=3.10.13 -y && conda clean --all -y
+
+### Activate the environment for subsequent RUN commands and set default
+ENV CONDA_DEFAULT_ENV visomaster
+# The following line modifies the container's bashrc for interactive sessions
+RUN echo "conda activate $CONDA_DEFAULT_ENV" >> ~/.bashrc
+# The following ENV makes the env active for subsequent RUN/CMD/ENTRYPOINT
+ENV PATH /opt/conda/envs/$CONDA_DEFAULT_ENV/bin:$PATH
+
+### Install CUDA and cuDNN via Conda
+RUN conda install -c nvidia/label/cuda-12.4.1 cuda-runtime -y
+RUN conda install -c conda-forge cudnn -y
+
+### Install visomaster
 WORKDIR /workspace
-# Clone specific branch
-RUN git clone --branch v0.1.6 https://github.com/visomaster/VisoMaster.git
+# MODIFIED: Clone specific tag v0.6.0 instead of branch
+RUN git clone --branch v0.6.0 https://github.com/visomaster/VisoMaster.git
 WORKDIR /workspace/VisoMaster
 
-# --- Debugging Step: List contents after cloning ---
-RUN ls -al
+### Install dependencies within the Conda environment
+# Aligning with reference file installation order
+RUN pip install -r ./requirements.txt --no-cache-dir
+RUN conda install scikit-image -y
+RUN pip install -r requirements_cu124.txt --no-cache-dir
 
-# Install Python dependencies
-# Ensure pip refers to the correct version (python3.10)
-RUN python3 -m pip install --no-cache-dir scikit-image
-RUN python3 -m pip install --no-cache-dir -r requirements_cu124.txt
-
-# --- MODEL DOWNLOAD SECTION REMAINS COMMENTED OUT ---
-# The On-Start script will handle this
+### Download models (MODIFIED: Removed from build - use On-Start script)
 # WORKDIR /workspace/VisoMaster/model_assets
-# RUN python3 download_models.py
-# WORKDIR /workspace/VisoMaster/model_assets
-# -------------------------------------
+# RUN python download_models.py
+# WORKDIR /workspace/VisoMaster # Return to VisoMaster root directory
 
-### Install jupyterlab
-RUN python3 -m pip install --no-cache-dir jupyterlab
+### Install jupyterlab within the Conda environment
+RUN pip install jupyterlab --no-cache-dir
 EXPOSE 8080
 
 ### Install filebrowser
@@ -136,7 +141,8 @@ EXPOSE 8585
 ### Final startup configuration
 # Copy the correct VNC startup script
 COPY ./src/vnc_startup_jupyterlab_filebrowser.sh /dockerstartup/vnc_startup.sh
-RUN chmod +x /dockerstartup/vnc_startup.sh
+# Using chmod 765 as in reference file, though +x is usually sufficient
+RUN chmod 765 /dockerstartup/vnc_startup.sh
 
 # Set default VNC resolution
 ENV VNC_RESOLUTION=1280x1024
