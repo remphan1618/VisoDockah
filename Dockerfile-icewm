@@ -129,7 +129,7 @@ WORKDIR /workspace/VisoMaster
 # RUN pip install -r ./requirements.txt --no-cache-dir
 RUN conda install scikit-image -y && conda clean --all -y
 # Install requirements and immediately purge pip cache
-RUN pip install -r requirements_cu124.txt && \
+RUN pip install -r requirements.txt && \
     pip cache purge
 
 ### Download models (MODIFIED: Removed from build - use On-Start script)
