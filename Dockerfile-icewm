@@ -130,7 +130,7 @@ WORKDIR /workspace/VisoMaster
 
 ### Install dependencies within the Conda environment
 # Aligning with reference file installation order
-RUN pip install -r requirements.txt --no-cache-dir
+RUN pip install -r requirements.txt
 RUN conda install scikit-image -y
 # MODIFIED: Commented out requirements_cu124.txt installation as requested
 # RUN pip install -r requirements_cu124.txt --no-cache-dir
