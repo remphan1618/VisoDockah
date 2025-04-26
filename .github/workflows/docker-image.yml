@@ -36,7 +36,7 @@ jobs:
         run: echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
       
       - name: Build Docker Image
-        run: docker build --no-cache -t remphan/visomasterdockah:latest -f Dockerfile-icewm .
+        run: docker build --no-cache -t remphan/visomasterdockah:latest -f Dockerfile .
 
       - name: Push Docker Image
         run: docker push remphan/visomasterdockah:latest
