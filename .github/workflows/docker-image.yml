@@ -39,7 +39,6 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/visomasterdockah:${{ github.sha }}
           cache-from: type=cache,id=visomaster-docker-cache
           cache-to: type=cache,id=visomaster-docker-cache,mode=max
-          
+
       - name: Image digest
         run: echo "Image digest: ${{ steps.build-and-push.outputs.digest }}"
-
