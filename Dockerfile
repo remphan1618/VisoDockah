@@ -2,19 +2,21 @@ FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
 
 ENV REFRESHED_AT 2024-08-12
 
-LABEL io.k8s.description="Headless VNC Container with Xfce window manager, firefox and chromium" \
-      io.k8s.display-name="Headless VNC Container based on Debian" \
-      io.openshift.expose-services="6901:http,5901:xvnc" \
-      io.openshift.tags="vnc, debian, xfce" \
+LABEL io.k8s.description="Headless VNC Container with Xfce for Jupyter + SSH" \
+      io.k8s.display-name="Jupyter + SSH Container" \
+      io.openshift.expose-services="8888:http,22:ssh" \
+      io.openshift.tags="jupyter, ssh, ubuntu, xfce" \
       io.openshift.non-scalable=true
 
-### Connection ports for controlling the UI:
-### VNC port:5901
-### noVNC webport, connect via http://IP:6901/?password=vncpassword
+### Connection ports:
+### Jupyter: 8888
+### SSH: 22
 ENV DISPLAY=:1 \
     VNC_PORT=5901 \
-    NO_VNC_PORT=6901
-EXPOSE $VNC_PORT $NO_VNC_PORT
+    NO_VNC_PORT=6901 \
+    JUPYTER_PORT=8888 \
+    SSH_PORT=22
+EXPOSE $JUPYTER_PORT $SSH_PORT
 
 ### Envrionment config
 ENV HOME=/workspace \
@@ -26,7 +28,8 @@ ENV HOME=/workspace \
     VNC_COL_DEPTH=24 \
     VNC_PW=vncpassword \
     VNC_VIEW_ONLY=false \
-    TZ=Asia/Seoul
+    TZ=Asia/Seoul \
+    JUPYTER_ENABLE_LAB=yes # Enable JupyterLab by default
 WORKDIR $HOME
 
 ### Install necessary dependencies
@@ -41,6 +44,7 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     jq \
     tzdata \
+    openssh-server \  # For SSH
     # Install Python 3 (default is 3.10 in Ubuntu 22.04) and pip
     python3 \
     python3-pip \
@@ -63,20 +67,21 @@ ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en' LC_ALL='en_US.UTF-8'
 ### Install custom fonts
 RUN $INST_SCRIPTS/install_custom_fonts.sh
 
-### Install xvnc-server & noVNC - HTML5 based VNC viewer
+### Install xvnc-server & noVNC - HTML5 based VNC viewer (for optional use)
 RUN $INST_SCRIPTS/tigervnc.sh
 RUN $INST_SCRIPTS/no_vnc_1.5.0.sh
 
 ### Install firefox and chrome browser
 RUN $INST_SCRIPTS/firefox.sh
 
-### Install IceWM UI
+### Install IceWM UI (For potential minimal UI)
 RUN $INST_SCRIPTS/icewm_ui.sh
 ADD ./src/debian/icewm/ $HOME/
 
-### configure startup
+### Configure startup scripts
 RUN $INST_SCRIPTS/libnss_wrapper.sh
-ADD ./src/common/scripts $STARTUPDIR
+COPY ./src/common/scripts $STARTUPDIR
+RUN chmod 765 $STARTUPDIR/*
 RUN $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
 
 ### Install VisoMaster and dependencies
@@ -116,11 +121,25 @@ RUN apt-get update && apt-get install -y \
     pcmanfm && \
     rm -rf /var/lib/apt/lists/*
 
-### Reconfigure startup
+### SSH Configuration
+RUN echo "root:vncpassword" | chpasswd
+RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/g' /etc/ssh/sshd_config
+RUN sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/g' /etc/ssh/sshd_config
+RUN mkdir -p /root/.ssh
+RUN ssh-keygen -t rsa -f /root/.ssh/id_rsa -N "" # No passphrase
+COPY ./src/common/ssh/authorized_keys /root/.ssh/authorized_keys
+RUN chmod 600 /root/.ssh/authorized_keys
+
+### Startup Script Modification
 COPY ./src/vnc_startup_jupyterlab_filebrowser.sh /dockerstartup/vnc_startup.sh
 RUN chmod 765 /dockerstartup/vnc_startup.sh
 
+# Add a new startup script specifically for ssh + jupyter
+COPY ./src/common/scripts/start_jupyter_ssh.sh /dockerstartup/start_jupyter_ssh.sh
+RUN chmod 755 /dockerstartup/start_jupyter_ssh.sh
+
 ENV VNC_RESOLUTION=1280x1024
 
-ENTRYPOINT ["/dockerstartup/vnc_startup.sh"]
+# Use the new script as the default
+ENTRYPOINT ["/dockerstartup/start_jupyter_ssh.sh"]
 CMD ["--wait"]
