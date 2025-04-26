@@ -16,7 +16,8 @@ LABEL io.k8s.description="Headless VNC Container with Xfce window manager, firef
 ENV DISPLAY=:1 \
     VNC_PORT=5901 \
     NO_VNC_PORT=6901
-EXPOSE $VNC_PORT $NO_VNC_PORT
+# Expose VNC ports even if not started automatically, plus Jupyter port
+EXPOSE $VNC_PORT $NO_VNC_PORT 8080 8585
 
 ### Envrionment config
 ENV HOME=/workspace \
@@ -29,7 +30,6 @@ ENV HOME=/workspace \
     VNC_PW=vncpassword \
     VNC_VIEW_ONLY=false \
     TZ=Asia/Seoul
-    # JUPYTER_DIR is removed as Jupyter will run within Conda env
 WORKDIR $HOME
 
 ### Install necessary base dependencies (excluding python which will come from Conda)
@@ -51,26 +51,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 ### Install Miniconda
-# FIX: Install Miniconda in one step
 RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
     bash miniconda.sh -b -p /opt/conda && \
     rm miniconda.sh
 
 ### Add Conda to the PATH
-# FIX: Add conda to PATH *before* trying to use conda commands
 ENV PATH /opt/conda/bin:$PATH
 
 ### Clean Conda cache
-# FIX: Run conda clean in a separate step after PATH is updated
 RUN conda clean --all -y
 
 ### Add all install scripts for further steps
-# Using COPY instead of ADD for local files is generally preferred
 COPY ./src/common/install/ $INST_SCRIPTS/
 COPY ./src/debian/install/ $INST_SCRIPTS/
 
 ### Give executable permissions to all the scripts in $INST_SCRIPTS
-# Using the simpler chmod pattern from the reference file
 RUN chmod +x $INST_SCRIPTS/*.sh
 
 ### Install some common tools using the script
@@ -85,16 +80,14 @@ ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en' LC_ALL='en_US.UTF-8'
 ### Install custom fonts
 RUN $INST_SCRIPTS/install_custom_fonts.sh
 
-### Install xvnc-server & noVNC - HTML5 based VNC viewer
+### Install xvnc-server & noVNC - HTML5 based VNC viewer (Still useful for manual start)
 RUN $INST_SCRIPTS/tigervnc.sh
 RUN $INST_SCRIPTS/no_vnc_1.5.0.sh
 
 ### Install firefox and chrome browser
 RUN $INST_SCRIPTS/firefox.sh
-# Assuming chrome installation is handled within firefox.sh or another script if needed
 
-### Install xfce UI
-# Aligning with the reference file: using xfce_ui.sh and copying config to $HOME
+### Install xfce UI (Still useful for manual VNC start)
 RUN $INST_SCRIPTS/xfce_ui.sh
 COPY ./src/common/xfce/ $HOME/
 
@@ -105,15 +98,11 @@ RUN chmod +x $STARTUPDIR/* # Ensure scripts in STARTUPDIR are executable
 RUN $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
 
 ### Create conda environment
-# Aligning with reference file: naming the env 'visomaster'
-# Now conda command should be found due to ENV PATH update
 RUN conda create -n visomaster python=3.10.13 -y && conda clean --all -y
 
 ### Activate the environment for subsequent RUN commands and set default
 ENV CONDA_DEFAULT_ENV visomaster
-# The following line modifies the container's bashrc for interactive sessions
 RUN echo "conda activate $CONDA_DEFAULT_ENV" >> ~/.bashrc
-# The following ENV makes the env active for subsequent RUN/CMD/ENTRYPOINT
 ENV PATH /opt/conda/envs/$CONDA_DEFAULT_ENV/bin:$PATH
 
 ### Install CUDA and cuDNN via Conda
@@ -143,25 +132,20 @@ RUN conda install scikit-image -y
 ### Install jupyterlab within the Conda environment
 # MODIFIED: Removed --no-cache-dir to match working version style
 RUN pip install jupyterlab
-EXPOSE 8080
 
 ### Install filebrowser
 # Ensure wget is installed (done earlier)
 RUN wget -qO- https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash
-EXPOSE 8585
 
 ### Final startup configuration
-# Copy the correct VNC startup script
+# Copy the VNC startup script (can be run manually if needed)
 COPY ./src/vnc_startup_jupyterlab_filebrowser.sh /dockerstartup/vnc_startup.sh
-# Using chmod 765 as in reference file, though +x is usually sufficient
 RUN chmod 765 /dockerstartup/vnc_startup.sh
 
-# Set default VNC resolution
+# Set default VNC resolution (still relevant if VNC started manually)
 ENV VNC_RESOLUTION=1280x1024
 
-# Set the entrypoint to the VNC startup script
-ENTRYPOINT ["/dockerstartup/vnc_startup.sh"]
-
-# Default command for the entrypoint script
-CMD ["--wait"]
+### MODIFIED: Removed ENTRYPOINT and CMD instructions
+# ENTRYPOINT ["conda", "run", "-n", "visomaster", "--no-capture-output"]
+# CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8080", "--no-browser", "--allow-root", "--notebook-dir=/workspace", "--NotebookApp.token=''", "--NotebookApp.password=''"]
 
