@@ -11,11 +11,11 @@ LABEL io.k8s.description="Headless VNC Container with Xfce for Jupyter + SSH" \
 ### Connection ports:
 ### Jupyter: 8888
 ### SSH: 22
-ENV DISPLAY=:1 \
-    VNC_PORT=5901 \
-    NO_VNC_PORT=6901 \
-    JUPYTER_PORT=8888 \
-    SSH_PORT=22
+ENV DISPLAY=:1
+ENV VNC_PORT=5901
+ENV NO_VNC_PORT=6901
+ENV JUPYTER_PORT=8888
+ENV SSH_PORT=22
 EXPOSE $JUPYTER_PORT $SSH_PORT
 
 ### Envrionment config
@@ -33,7 +33,8 @@ ENV JUPYTER_ENABLE_LAB=yes # Enable JupyterLab by default
 WORKDIR $HOME
 
 ### Install necessary dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
     wget \
     git \
     build-essential \
@@ -44,15 +45,12 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     jq \
     tzdata \
-    openssh-server \  # For SSH
-    # Install Python 3 (default is 3.10 in Ubuntu 22.04) and pip
+    openssh-server \
     python3 \
-    python3-pip \
-    python3-venv && \
+    python3-pip && \
     ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
     dpkg-reconfigure -f noninteractive tzdata && \
     rm -rf /var/lib/apt/lists/* && \
-    # Ensure pip is up to date
     python3 -m pip install --no-cache-dir --upgrade pip
 
 ### Add all install scripts for further steps
@@ -100,18 +98,22 @@ RUN wget -O - https://raw.githubusercontent.com/filebrowser/get/master/get.sh | 
 EXPOSE 8585
 
 # nvidia problem
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
     libegl1 \
     libgl1-mesa-glx \
-    libglib2.0-0
+    libglib2.0-0 && \
+    rm -rf /var/lib/apt/lists/*
 # qt prblem
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
     libxcb-cursor0 \
     libxcb-xinerama0 \
     libxkbcommon-x11-0 && \
     rm -rf /var/lib/apt/lists/*
     
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
     libqt5gui5 \
     libqt5core5a \
     libqt5widgets5 \
@@ -119,7 +121,8 @@ RUN apt-get update && apt-get install -y \
     rm -rf /var/lib/apt/lists/*
 
 # fileman
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
     pcmanfm && \
     rm -rf /var/lib/apt/lists/*
 
