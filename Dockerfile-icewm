@@ -1,13 +1,13 @@
-# Base image
+# Base image (already includes CUDA 12.4.1 and cuDNN)
 FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
 
 # Metadata and environment variables
-ENV REFRESHED_AT 2024-08-12
+ENV REFRESHED_AT 2024-08-12 # Consider updating this date
 
 LABEL io.k8s.description="Headless VNC Container with Xfce window manager, firefox and chromium" \
-      io.k8s.display-name="Headless VNC Container based on Debian" \
+      io.k8s.display-name="Headless VNC Container based on Debian/Ubuntu" \
       io.openshift.expose-services="6901:http,5901:xvnc" \
-      io.openshift.tags="vnc, debian, xfce" \
+      io.openshift.tags="vnc, ubuntu, xfce" \
       io.openshift.non-scalable=true
 
 ### Connection ports for controlling the UI:
@@ -16,7 +16,7 @@ LABEL io.k8s.description="Headless VNC Container with Xfce window manager, firef
 ENV DISPLAY=:1 \
     VNC_PORT=5901 \
     NO_VNC_PORT=6901
-# Expose VNC ports even if not started automatically, plus Jupyter port
+# Expose VNC ports even if not started automatically, plus Jupyter port, filebrowser
 EXPOSE $VNC_PORT $NO_VNC_PORT 8080 8585
 
 ### Envrionment config
@@ -29,10 +29,14 @@ ENV HOME=/workspace \
     VNC_COL_DEPTH=24 \
     VNC_PW=vncpassword \
     VNC_VIEW_ONLY=false \
+    # Set default locale environment variables after locale configuration
+    LANG='en_US.UTF-8' \
+    LANGUAGE='en_US:en' \
+    LC_ALL='en_US.UTF-8' \
     TZ=Asia/Seoul
 WORKDIR $HOME
 
-### Install necessary base dependencies (excluding python which will come from Conda)
+### Install necessary base dependencies including Python 3.10 and pip
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     git \
@@ -43,46 +47,40 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     ffmpeg \
     jq \
-    tzdata && \
+    tzdata \
+    # Install Python 3 (default is 3.10 in Ubuntu 22.04) and pip
+    python3 \
+    python3-pip \
+    python3-venv \
+    # Needed for locale-gen
+    locales && \
     # Configure timezone
     ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && \
     dpkg-reconfigure -f noninteractive tzdata && \
-    # Clean up
-    rm -rf /var/lib/apt/lists/*
-
-### Install Miniconda
-RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
-    bash miniconda.sh -b -p /opt/conda && \
-    rm miniconda.sh
-
-### Add Conda to the PATH
-ENV PATH /opt/conda/bin:$PATH
-
-### Clean Conda cache
-RUN conda clean --all -y
+    # Configure locale
+    echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
+    locale-gen en_US.UTF-8 && \
+    # Clean up apt cache
+    rm -rf /var/lib/apt/lists/* && \
+    # Ensure pip is up to date
+    python3 -m pip install --no-cache-dir --upgrade pip
 
 ### Add all install scripts for further steps
 COPY ./src/common/install/ $INST_SCRIPTS/
-COPY ./src/debian/install/ $INST_SCRIPTS/
+COPY ./src/debian/install/ $INST_SCRIPTS/ # Keeping name 'debian' for now, but base is Ubuntu
 
 ### Give executable permissions to all the scripts in $INST_SCRIPTS
 RUN chmod +x $INST_SCRIPTS/*.sh
 
 ### Install some common tools using the script
-# MODIFIED: Reverted to use the correct path via $INST_SCRIPTS
 RUN $INST_SCRIPTS/tools.sh
-# Assuming tools.sh installs 'locales' package if needed for the next step
-
-# Configure locale (ensure 'locales' package is installed by tools.sh)
-RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && locale-gen
-ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en' LC_ALL='en_US.UTF-8'
 
 ### Install custom fonts
 RUN $INST_SCRIPTS/install_custom_fonts.sh
 
 ### Install xvnc-server & noVNC - HTML5 based VNC viewer (Still useful for manual start)
 RUN $INST_SCRIPTS/tigervnc.sh
-RUN $INST_SCRIPTS/no_vnc_1.5.0.sh
+RUN $INST_SCRIPTS/no_vnc_1.5.0.sh # Ensure this script doesn't have hardcoded python paths if any
 
 ### Install firefox and chrome browser
 RUN $INST_SCRIPTS/firefox.sh
@@ -97,30 +95,21 @@ COPY ./src/common/scripts $STARTUPDIR
 RUN chmod +x $STARTUPDIR/* # Ensure scripts in STARTUPDIR are executable
 RUN $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
 
-### Create conda environment
-RUN conda create -n visomaster python=3.10.13 -y && conda clean --all -y
+### --- Conda Environment Section Removed ---
 
-### Activate the environment for subsequent RUN commands and set default
-ENV CONDA_DEFAULT_ENV visomaster
-RUN echo "conda activate $CONDA_DEFAULT_ENV" >> ~/.bashrc
-ENV PATH /opt/conda/envs/$CONDA_DEFAULT_ENV/bin:$PATH
-
-### Install CUDA and cuDNN via Conda
-RUN conda install -c nvidia/label/cuda-12.4.1 cuda-runtime -y
-RUN conda install -c conda-forge cudnn -y
+### Rely on base image for CUDA and cuDNN - removing Conda installs for these
 
 ### Install visomaster
 WORKDIR /workspace
-# MODIFIED: Clone your repo (default branch) and removed checkout step
 RUN git clone https://github.com/remphan1618/VisoMaster.git && \
     cd VisoMaster && \
-    cd ..
-WORKDIR /workspace/VisoMaster
+    cd .. # This cd .. seems odd, maybe intended? It returns to /workspace
+WORKDIR /workspace/VisoMaster # Explicitly set back to VisoMaster directory
 
-### Install dependencies within the Conda environment
-# MODIFIED: Use requirements.txt (without --no-cache-dir) as per working version
-RUN pip install -r requirements.txt
-RUN conda install scikit-image -y
+### Install dependencies using pip
+# Use --no-cache-dir to potentially reduce layer size
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir scikit-image
 # MODIFIED: Keep requirements_cu124.txt commented out
 # RUN pip install -r requirements_cu124.txt --no-cache-dir
 
@@ -129,9 +118,8 @@ RUN conda install scikit-image -y
 # RUN python download_models.py
 # WORKDIR /workspace/VisoMaster # Return to VisoMaster root directory
 
-### Install jupyterlab within the Conda environment
-# MODIFIED: Removed --no-cache-dir to match working version style
-RUN pip install jupyterlab
+### Install jupyterlab using pip
+RUN pip install --no-cache-dir jupyterlab
 
 ### Install filebrowser
 # Ensure wget is installed (done earlier)
@@ -145,7 +133,5 @@ RUN chmod 765 /dockerstartup/vnc_startup.sh
 # Set default VNC resolution (still relevant if VNC started manually)
 ENV VNC_RESOLUTION=1280x1024
 
-### MODIFIED: Removed ENTRYPOINT and CMD instructions
-# ENTRYPOINT ["conda", "run", "-n", "visomaster", "--no-capture-output"]
-# CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8080", "--no-browser", "--allow-root", "--notebook-dir=/workspace", "--NotebookApp.token=''", "--NotebookApp.password=''"]
-
+### Removed ENTRYPOINT and CMD instructions that used Conda
+# The container will likely be started using the vnc_startup.sh script or an external command.
