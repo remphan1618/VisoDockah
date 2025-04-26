@@ -19,17 +19,17 @@ ENV DISPLAY=:1 \
 EXPOSE $JUPYTER_PORT $SSH_PORT
 
 ### Envrionment config
-ENV HOME=/workspace \
-    TERM=xterm \
-    STARTUPDIR=/dockerstartup \
-    INST_SCRIPTS=/workspace/install \
-    NO_VNC_HOME=/workspace/noVNC \
-    DEBIAN_FRONTEND=noninteractive \
-    VNC_COL_DEPTH=24 \
-    VNC_PW=vncpassword \
-    VNC_VIEW_ONLY=false \
-    TZ=Asia/Seoul \
-    JUPYTER_ENABLE_LAB=yes # Enable JupyterLab by default
+ENV HOME=/workspace
+ENV TERM=xterm
+ENV STARTUPDIR=/dockerstartup
+ENV INST_SCRIPTS=/workspace/install
+ENV NO_VNC_HOME=/workspace/noVNC
+ENV DEBIAN_FRONTEND=noninteractive
+ENV VNC_COL_DEPTH=24
+ENV VNC_PW=vncpassword
+ENV VNC_VIEW_ONLY=false
+ENV TZ=Asia/Seoul
+ENV JUPYTER_ENABLE_LAB=yes # Enable JupyterLab by default
 WORKDIR $HOME
 
 ### Install necessary dependencies
@@ -62,7 +62,9 @@ RUN chmod 765 $INST_SCRIPTS/*
 
 ### Install some common tools
 RUN $INST_SCRIPTS/tools.sh
-ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en' LC_ALL='en_US.UTF-8'
+ENV LANG='en_US.UTF-8'
+ENV LANGUAGE='en_US:en'
+ENV LC_ALL='en_US.UTF-8'
 
 ### Install custom fonts
 RUN $INST_SCRIPTS/install_custom_fonts.sh
@@ -129,6 +131,11 @@ RUN mkdir -p /root/.ssh
 RUN ssh-keygen -t rsa -f /root/.ssh/id_rsa -N "" # No passphrase
 COPY ./src/common/ssh/authorized_keys /root/.ssh/authorized_keys
 RUN chmod 600 /root/.ssh/authorized_keys
+
+### Copy the On-Start Script into the container
+COPY ./your_on_start_script.sh /dockerstartup/on_start.sh # Copy the script
+RUN chmod +x /dockerstartup/on_start.sh # Make it executable
+
 
 ### Startup Script Modification
 COPY ./src/vnc_startup_jupyterlab_filebrowser.sh /dockerstartup/vnc_startup.sh
