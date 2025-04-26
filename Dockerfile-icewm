@@ -69,8 +69,8 @@ COPY ./src/debian/install/ $INST_SCRIPTS/
 RUN chmod +x $INST_SCRIPTS/*.sh
 
 ### Install some common tools using the script
-# MODIFIED: Changed based on user-provided diff
-RUN chmod +x /src/debian/install/tools.sh && /src/debian/install/tools.sh
+# MODIFIED: Reverted to use the correct path via $INST_SCRIPTS
+RUN $INST_SCRIPTS/tools.sh
 # Assuming tools.sh installs 'locales' package if needed for the next step
 
 # Configure locale (ensure 'locales' package is installed by tools.sh)
