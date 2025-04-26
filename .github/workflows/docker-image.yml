@@ -1,54 +1,75 @@
+# .github/workflows/docker-image.yml
+# Workflow to automatically build the Docker image and push it to Docker Hub
+
 name: Build and Push Docker Image
 
+# Controls when the workflow will run
 on:
+  # Triggers the workflow on push events but only for the main branch
   push:
     branches:
-      - main  # Trigger on pushes to the main branch
-  workflow_dispatch:  # Allow manual triggering from the GitHub UI
+      - main
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
 
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
+  # This workflow contains a single job called "build-and-push"
   build-and-push:
+    # The name of the job displayed on GitHub
     name: Build and Push VisoMaster Image
+    # The type of runner that the job will run on
     runs-on: ubuntu-latest
-    permissions: # Optional: Add permissions if needed for advanced cache/registry interactions
+    # Permissions needed for the job (adjust if caching to GHCR)
+    permissions:
       contents: read
-      packages: write # Needed if caching to GHCR, not strictly needed for GHA cache or Docker Hub push
+      packages: write
 
+    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
+      # Step 1: Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Fetches all history for all branches and tags, useful for tags/shas
+          # Fetch all history for all tags and branches, needed for accurate SHA tagging
+          fetch-depth: 0
 
+      # Step 2: Set up Docker Buildx for advanced build capabilities
       - name: Set up Docker Buildx
-        # Uses the default 'docker-container' driver which works well with GHA cache
-        # If you previously had 'driver: docker', removing it lets the action use the recommended default.
         uses: docker/setup-buildx-action@v3
+        # Uses the default 'docker-container' driver
 
+      # Step 3: Log in to Docker Hub using secrets stored in GitHub
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
-          # Use a Docker Hub Access Token here for better security
-          password: ${{ secrets.DOCKERHUB_PASSWORD }} # Should be a Docker Hub Access Token
+          # IMPORTANT: Use a Docker Hub Access Token stored in secrets, not your password!
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
+      # Step 4: Build the Docker image using the Dockerfile and push it to Docker Hub
       - name: Build and push Docker image
-        id: build-and-push
+        id: build-and-push # Give this step an ID to reference its outputs later
         uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile # Assuming Dockerfile is in the root
-          # Enable pushing to Docker Hub only for the main branch or manual dispatch
+        with:  # <- Line 54
+          # Ensure lines below are indented correctly (typically 2 spaces more than 'with:')
+          context: . # Define the build context (current directory)
+          file: ./Dockerfile # Specify the path to the Dockerfile
+          # Push the image only when triggered by a push to main or manually
           push: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+          # Define the tags for the image on Docker Hub
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/visomasterdockah:latest
-            # Add a tag based on the Git commit SHA for versioning
             ${{ secrets.DOCKERHUB_USERNAME }}/visomasterdockah:${{ github.sha }}
-          # Use GitHub Actions cache for better layer caching between runs
+          # Configure caching using GitHub Actions cache for faster rebuilds
           cache-from: type=gha
-          cache-to: type=gha,mode=max # mode=max includes intermediate layers
+          cache-to: type=gha,mode=max # 'max' mode includes intermediate layers in the cache
 
+      # Step 5: Output the digest (unique identifier) of the pushed image
       - name: Image digest
-        # Runs only if the image was built and pushed
+        # Only run this step if the previous step actually produced a digest (i.e., pushed successfully)
         if: steps.build-and-push.outputs.digest != ''
-        run: echo "Pushed image digest: ${{ steps.build-and-push.outputs.digest }}"
+        # Print the digest to the workflow logs
+        run: echo "Pushed image digest - ${{ steps.build-and-push.outputs.digest }}"
+
+
